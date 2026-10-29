@@ -29,38 +29,24 @@ plates, brackets, and tube sections.
 
 ## What this is not
 
-- Not a general-purpose CAD system and not a general B-rep kernel. No arbitrary
-  3D booleans, no 3D rolling-ball fillets, no sculpted surfaces.
-- Not an f-rep/implicit modeler. (Implicit tools are excellent for printed
-  lattices; this assembly is plates and tubes that must be machined, measured,
-  and bolted to existing hardware.)
+- Not a general-purpose CAD system and not a general B-rep or f-rep kernel. Not
+  arbitrary 3D booleans, no 3D rolling-ball fillets, no sculpted surfaces.
 - No STEP *import*, no CAD GUI, and no notebook-driven design environment. Design
   happens in Julia scripts and the REPL, with MeshCat for interactive inspection.
 - Out-of-scope operations are borrowed, not built: STEP export will use an
-  OCCT-backed bridge, and a part that genuinely outgrows 2.5D goes to Build123d
-  via PythonCall rather than growing this kernel.
+  OCCT-backed bridge
 
 ## Principles
 
 1. **Manufacturability by construction.** The modeling vocabulary is the shop's
    operation vocabulary. Unmanufacturable-by-these-means geometry is
-   unrepresentable, not merely warned about.
+   unrepresentable.
 2. **Features are the model; geometry is derived.** A `Hole` is a first-class
    object with a stable identity, not something reverse-engineered from faces.
    The hole table, drill plan, and inspection sheet are *reads* of the model.
-3. **One parameter source.** Each project's dimensions, stock sizes, and design
-   parameters live in parameter files. Every artifact regenerates from them.
-   No number is ever hand-copied into a drawing or table.
-4. **Unmeasured means gated.** Parameters taken from published specs are marked
-   `measured = false`. Design exploration stays open, but fabrication outputs
-   (DXF, templates, STEP for quoting) refuse to generate from unmeasured values
-   without an explicit override.
-5. **Tolerances are data.** Fit against mating hardware is checked across tolerance
+3. **Tolerances are data.** Fit against mating hardware is checked across tolerance
    ranges, not assumed at nominal dimensions.
-6. **Artifacts are generated, never hand-edited.** If an output is wrong, the
-   code is fixed and the output regenerated.
-7. **Boring Julia.** Plain structs and functions; multiple dispatch only where
-   it earns its keep (operations × part types); few dependencies.
+4. **Dead simple Julia.** Structs + functions + multiple dispatch.
 
 ## Architecture
 
@@ -77,9 +63,6 @@ params.toml ──► feature model ──► derived geometry ──► DFM che
 - **Derived geometry** — exact 2D profile polygons for dimensions and cutting
   layouts; a tessellated mesh for display and assembly interference checks.
   No face/edge/vertex topology is maintained — the initial 2.5D scope doesn't need it.
-- **Mating hardware is modeled too** — applications can represent neighboring
-  parts with the same tools, so assembly fit is a computation, not a hope. For the
-  GHD project, this includes the SM-2.5 stand.
 - **Process layer** — the operation list *is* the process plan. Cycle-time and
   cost estimation, drill sequences, and inspection points are generated from it.
 
@@ -97,9 +80,7 @@ dependency only when the corresponding functionality is implemented.
 | Mesh interchange   | GeometryBasics.jl — MeshCat/MeshIO-compatible meshes |
 | Mesh export        | MeshIO.jl / FileIO.jl — STL initially           |
 | Visualization      | MeshCat.jl — interactive 3D in a browser        |
-| Design workflow    | Julia scripts + REPL/VS Code; Revise.jl for development |
 | STEP export        | OCCT-backed bridge; evaluate Gmsh.jl before M3  |
-| Testing            | Test (stdlib) — unit tests + DFM assertions     |
 
 LibGEOS is the initial polygon backend because it works directly with floating-
 point coordinates and provides the required booleans and offsets. A Clipper
