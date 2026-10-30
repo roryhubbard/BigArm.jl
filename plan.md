@@ -18,7 +18,7 @@ this plan.
 - A small, general-purpose set of primitives in `src/` with a shallow type
   hierarchy and plain structs at the leaves
 - Manufacturability rules enforced by multiple dispatch and struct construction
-- Raw rectangular-tube mill stock (`RectTube`), a cutoff operation (`saw`), and
+- Raw rectangular-tube mill stock (`RectangularTube`), a cutoff operation (`saw`), and
   a cross-drilling operation (`drill` with `Hole`)
 - Immutable part nodes where each operation takes a part and returns a new part,
   forming a directed acyclic manufacturing graph
@@ -46,7 +46,7 @@ this plan.
 ## Core architecture
 
 ```text
-stick = RectTube(...)
+stick = RectangularTube(...)
         │
         ▼  saw(stick, L)
       blank
@@ -62,40 +62,39 @@ stick = RectTube(...)
 ### 1. Primitives and type hierarchy
 
 Nothing under `src/` mentions Rogue, GHD, or SM-2.5. Primitives are named for
-what they are in CAD/CAM:
+what they are in CAD/CAM, with two root abstract types and plain structs at the
+leaves:
 
 ```text
-AbstractPart{S<:AbstractStock}
-├── StockPart{S}          # root node: raw mill stock
-└── OperatedPart{S,O}     # child node: parent part + shop operation + updated state
-
-AbstractStock
-└── RectTube              # outer width, outer depth, wall thickness, length
+AbstractPart
+└── AbstractTube
+    └── RectangularTube   # width, height, length, wall, parent, op
 
 AbstractOperation
 ├── Saw                   # target cut length
 └── Drill                 # Hole applied to a part
 
-Hole                      # diameter, z position (and axis/face convention)
+Hole                      # diameter, z position
 ```
 
-Parameterizing `AbstractPart{S}` by the stock kind `S` keeps the hierarchy
-shallow while preserving dispatch across operations: `saw(stick, 103.0)` returns
-an `AbstractPart{RectTube}`, so subsequent `drill(part, Hole(...))` calls still
-dispatch on a rectangular-tube part without losing type information as the graph
-grows.
+Raw mill stock is not a separate type; it is simply a root `AbstractPart` whose
+`parent` and `op` are `nothing` (`isstock(p) = isnothing(p.parent)`). Because
+`saw` and `drill` take a `RectangularTube` and return a new `RectangularTube`
+linked to the previous one, every intermediate and final node keeps its concrete
+part type without needing wrapper structs or type parameters.
 
 ### 2. Manufacturability rules (dispatch + construction)
 
 Following the CVX analogy in `README.md`, rules are enforced at two layers:
 
-- **Dispatch** determines which operations apply to which stock kinds. Only
-  methods representing valid shop operations exist (`saw` and `drill` on
-  `AbstractPart{RectTube}`).
+- **Dispatch** determines which operations apply to which parts. Only methods
+  representing valid shop operations exist (`saw(::AbstractTube, length)` and
+  `drill(::RectangularTube, ::Hole)`).
 - **Construction** validates physical dimensions and shop constraints before a
-  node can be created:
-  - `RectTube`: finite positive width, depth, wall thickness, and length; wall
-    thickness strictly less than half of width and depth (`2 * wall < min(w, d)`).
+  new part node can be created:
+  - `RectangularTube`: finite positive width, height, length, and wall thickness;
+    wall thickness strictly less than half of width and height
+    (`2 * wall < min(w, h)`).
   - `saw(part, length)`: finite positive target length strictly less than or
     equal to the current part's length; cannot saw across an existing hole.
   - `drill(part, Hole(diameter, z))`: finite positive hole diameter and position;
@@ -109,9 +108,9 @@ immediately and no node is constructed.
 
 ### 3. The manufacturing graph
 
-Because every `OperatedPart` stores a reference to its `parent::AbstractPart`
-and the `op::AbstractOperation` that produced it, a part *is* a handle to its
-own manufacturing history — no global mutable graph is needed.
+Because every part node stores its `parent::Union{Nothing,AbstractPart}` and the
+`op::Union{Nothing,AbstractOperation}` that produced it, a part *is* a handle to
+its own manufacturing history — no global mutable graph is needed.
 
 - `graph(part)` (or `graph(parts...)`) walks parent links to collect the unique
   part nodes and directed operation edges `(parent ──op──► child)` in
@@ -124,11 +123,11 @@ own manufacturing history — no global mutable graph is needed.
 ### 4. Coordinates and units
 
 - Units: **inches**, `Float64`.
-- Right-handed local coordinates on `RectTube`:
+- Right-handed local coordinates on `RectangularTube`:
   - `Z`: along the tube length, from `0.0` at the base to `length` at the top.
   - `X`: across the front/back face width (`-width/2` to `+width/2`).
-  - `Y`: across the tube depth (`-depth/2` to `+depth/2`), parallel to the
-    cross-hole drilling axis.
+  - `Y`: across the tube cross-section height (`-height/2` to `+height/2`),
+    parallel to the cross-hole drilling axis.
 - One `Drill(Hole(diameter, z))` operation represents a single cross-drilled
   through-hole along the `Y` axis and produces aligned circular openings in both
   the front (`+Y`) and back (`-Y`) walls.
@@ -137,8 +136,8 @@ own manufacturing history — no global mutable graph is needed.
 
 Geometry is a read of a part node, never stored as the source of truth:
 
-- From any `AbstractPart{RectTube}`, collect its current `RectTube` dimensions
-  and all `Drill` operations in its ancestor chain.
+- From any `RectangularTube`, collect its dimensions and all `Drill` operations
+  in its ancestor chain.
 - Build the 2D outer/inner wall profiles, perforating the front and back outer
   and inner wall faces with circular hole polygons at each drilled `z`.
 - Triangulate the perforated wall faces with `Triangulate.jl` and connect the
@@ -150,8 +149,8 @@ Geometry is a read of a part node, never stored as the source of truth:
 ```text
 src/
   BigArm.jl
-  primitives.jl       AbstractPart, AbstractStock, AbstractOperation,
-                      RectTube, Hole, Saw, Drill, saw, drill
+  primitives.jl       AbstractPart, AbstractTube, AbstractOperation,
+                      RectangularTube, Hole, Saw, Drill, isstock, saw, drill
   graph.jl            ManufacturingGraph, graph, hole_table, to_dot
   geometry.jl         2D perforated wall profiles, triangulation, derive_mesh
   visualization.jl    visualize(part) via MeshCat, visualize(graph) via Graphviz
@@ -182,11 +181,10 @@ holes can be triangulated directly with `Triangulate.jl`.
 
 ### Task 1: Primitives and manufacturability rules
 
-- Define `AbstractStock`, `AbstractOperation`, `AbstractPart{S}`,
-  `StockPart{S}`, and `OperatedPart{S,O}`.
-- Implement `RectTube`, `Hole`, `Saw`, and `Drill`.
-- Implement `saw(part, length)` and `drill(part, hole)` with all dimensional and
-  shop-rule checks.
+- Define `AbstractPart`, `AbstractTube`, and `AbstractOperation`.
+- Implement `RectangularTube`, `Hole`, `Saw`, `Drill`, and `isstock`.
+- Implement `saw(part::AbstractTube, length)` and
+  `drill(part::RectangularTube, hole)` with all dimensional and shop-rule checks.
 - Write unit tests in `test/primitives.jl` covering valid chains and verifying
   that invalid stock dimensions, oversized holes, out-of-bounds holes,
   overlapping holes, and cuts across existing holes throw errors.
@@ -204,7 +202,7 @@ holes can be triangulated directly with `Triangulate.jl`.
 ### Task 3: Derived 2D/3D geometry
 
 - Implement 2D boundary and hole-loop construction for the four outer and four
-  inner faces of a `RectTube` part node.
+  inner faces of a `RectangularTube` part node.
 - Triangulate the perforated front and back faces with `Triangulate.jl`, mesh
   the unperforated side walls and top/bottom end caps, and stitch the cylindrical
   through-hole barrels connecting each outer wall to its inner wall.
@@ -224,7 +222,7 @@ holes can be triangulated directly with `Triangulate.jl`.
 ### Task 5: SM-2.5 upright model
 
 - In `projects/ghd/upright.jl`, define `UprightSpec` and `build_upright(spec)`
-  using `RectTube`, `saw`, and `drill`.
+  using `RectangularTube`, `saw`, and `drill`.
 - Record published SM-2.5 values from `DIMENSIONS.md` (3×3″ section, 11-gauge
   ≈ 0.120″ wall, 103″ height, 1″ hole class on 2″ centers) and explicitly mark
   assumed values (raw stick length, exact drilled diameter, first-hole offset,
@@ -247,7 +245,7 @@ The plan is complete when the README example runs end to end:
 using Revise
 using BigArm
 
-stick = RectTube(3.0, 3.0, 0.120, 288.0)
+stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
 blank = saw(stick, 103.0)
 
 upright = blank

@@ -165,8 +165,8 @@ One SM-2.5 upright, as mill stock and shop operations:
 ```julia
 using BigArm
 
-stick = RectTube(3.0, 3.0, 0.120, 288.0)  # 3×3″ 11-gauge tube, 24′ mill stick
-blank = saw(stick, 103.0)                 # cut to length, inches
+stick = RectangularTube(3.0, 3.0, 288.0, 0.120)  # 3×3″ 11-gauge tube, 24′ mill stick
+blank = saw(stick, 103.0)                        # cut to length, inches
 
 upright = blank
 for z in 2.0:2.0:100.0                      # 2″ centers; first-hole offset assumed

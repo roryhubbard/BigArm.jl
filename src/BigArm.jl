@@ -1,5 +1,17 @@
 module BigArm
 
-# Write your package code here.
+export AbstractPart,
+    AbstractTube,
+    AbstractOperation,
+    RectangularTube,
+    Hole,
+    Saw,
+    Drill,
+    isstock,
+    holes,
+    saw,
+    drill
+
+include("primitives.jl")
 
 end
