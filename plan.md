@@ -1,324 +1,271 @@
-# BigArm staged end-to-end implementation plan
+# BigArm implementation plan
 
 ## Goal
 
-First build a parameter-driven, schematic Rogue SM-2.5 upright with its circular
-through-hole pattern. Then reuse that upright in a schematic model of the complete
-stand assembly.
+Define BigArm's initial set of CAD/CAM primitives and use them to model a single
+Rogue SM-2.5 squat stand upright as raw mill stock evolved through shop
+operations, with visualization of both the derived part geometry and the
+manufacturing graph that produces it.
 
-Use reusable BigArm primitives and application-specific model code. MeshCat is a
-downstream viewer for derived geometry, not the design environment or geometry
-kernel.
+Everything beyond this single upright — full-stand assemblies, adapter plates,
+DXF/STEP exports, DFM test suites, and cost estimation — is out of scope for
+this plan.
 
-Both slices are **schematic**, not fabrication-ready. `DIMENSIONS.md` provides the
-upright section, nominal height, circular-hole specification, overall footprint,
-and other published product information, but not all dimensions required for an
-exact model. `sm_25_monster_squat_stand_2.png` is the visual reference for the
-hole pattern and assembly member layout.
+## Scope
 
-## Slice 1: single perforated upright
+### Include
 
-### Scope
+- A small, general-purpose set of primitives in `src/` with a shallow type
+  hierarchy and plain structs at the leaves
+- Manufacturability rules enforced by multiple dispatch and struct construction
+- Raw rectangular-tube mill stock (`RectTube`), a cutoff operation (`saw`), and
+  a cross-drilling operation (`drill` with `Hole`)
+- Immutable part nodes where each operation takes a part and returns a new part,
+  forming a directed acyclic manufacturing graph
+- Derived 3D mesh geometry for any part node in the graph (raw stick, sawn
+  blank, partially drilled tube, or finished upright), with real circular
+  openings through both front and back walls
+- Interactive 3D geometry visualization in MeshCat (`visualize(part)`)
+- Manufacturing graph extraction and Graphviz visualization
+  (`visualize(graph(part))`)
+- A schematic SM-2.5 upright script in `projects/ghd/` built from those
+  primitives, with published values distinguished from assumptions
+- Nonvisual unit and end-to-end tests
 
-Include:
+### Exclude
 
-- One hollow 3×3-inch rectangular-tube upright
-- Parameterized upright length and wall thickness
-- Nominal 1-inch circular cross-holes on 2-inch centers
-- Aligned openings through the front and back tube walls
-- Real circular openings in the derived mesh, not just hole markers
-- First-class hole features with stable identities
-- An in-memory hole table derived from the same features
-- Typed Julia design specifications and structural validation
-- Interactive MeshCat visualization
-- Nonvisual end-to-end tests
+- Other stand members (base feet, crossmembers, pull-up bars, gussets) and
+  multi-part assemblies
+- Side keyholes (exact profile dimensions are not published)
+- Plate stock, round bar, pockets, and welds (added later only when demanded by
+  subsequent GHD parts)
+- TOML parameter files and loaders (design directly in Julia first)
+- DXF, STEP, STL, and drawing file exports
+- Advisory DFM checks and cost/cycle-time estimation
 
-Exclude for now:
-
-- Side keyholes, whose exact profile dimensions are not published
-- Fabrication-ready hole diameters or drilling files
-- Gussets, base feet, crossmembers, pull-up bars, and other assembly members
-- DXF, STEP, and other file exports
-- A general DFM rules engine
-- Exact-fit or fabrication-ready claims
-
-The published 1-inch hardware class is not necessarily the actual manufactured
-hole diameter. The modeled diameter, first-hole offset, and hole count must be
-explicit fields in the Julia design specification; any value not established by
-the published documentation is identified as an assumption in the application
-code.
-
-## Slice 2: complete schematic assembly
-
-Reuse the perforated upright definition from slice 1 and add:
-
-- A second instance of the same upright part
-- Two longitudinal base feet, one beneath each upright
-- One transverse lower crossmember connecting the left and right assemblies
-- Fat/skinny top pull-up bars
-- Hollow rectangular-tube and solid round-bar geometry
-- Explicit instance placements and assembly transforms
-- Assembly-level validation and nonvisual smoke tests
-
-The resulting schematic has seven instances: two uprights, two base feet, one
-lower crossmember, and two pull-up bars. Gussets, rubber feet, base-hole patterns,
-and keyholes remain excluded unless separately added with suitable dimensions.
-
-## Architecture
-
-### Slice 1 data flow
+## Core architecture
 
 ```text
-UprightSpec(...) in projects/ghd/design.jl
-              │
-              ▼
-       build_upright(spec)
-       tube blank + hole features
-              │
-              ▼
-             Part
-              │
-       ┌──────┴───────────┐
-       ▼                  ▼
-  validation       derived 2D profiles
-                          │
-                    triangulated walls
-                          │
-                   ┌──────┴──────┐
-                   ▼             ▼
-              local mesh      hole table
-                   │
-                   ▼
-                MeshCat
+stick = RectTube(...)
+        │
+        ▼  saw(stick, L)
+      blank
+        │
+        ▼  drill(blank, Hole(...))   × N
+     upright
+        │
+        ├──► derive_mesh(part) ──► MeshCat
+        ├──► graph(part)       ──► Graphviz (DOT / SVG)
+        └──► hole_table(part)  ──► in-memory inspection
 ```
 
-### Slice 2 expansion
+### 1. Primitives and type hierarchy
+
+Nothing under `src/` mentions Rogue, GHD, or SM-2.5. Primitives are named for
+what they are in CAD/CAM:
 
 ```text
-perforated upright Part ──► two Instances
-base-foot Parts ──────────► two Instances
-lower-crossmember Part ───► one Instance
-pull-up-bar Parts ────────► two Instances
-                              │
-                              ▼
-                           Assembly
-                              │
-                    poses + derived local meshes
-                              │
-                              ▼
-                           MeshCat
+AbstractPart{S<:AbstractStock}
+├── StockPart{S}          # root node: raw mill stock
+└── OperatedPart{S,O}     # child node: parent part + shop operation + updated state
+
+AbstractStock
+└── RectTube              # outer width, outer depth, wall thickness, length
+
+AbstractOperation
+├── Saw                   # target cut length
+└── Drill                 # Hole applied to a part
+
+Hole                      # diameter, z position (and axis/face convention)
 ```
 
-### Reusable package code
+Parameterizing `AbstractPart{S}` by the stock kind `S` keeps the hierarchy
+shallow while preserving dispatch across operations: `saw(stick, 103.0)` returns
+an `AbstractPart{RectTube}`, so subsequent `drill(part, Hole(...))` calls still
+dispatch on a rectangular-tube part without losing type information as the graph
+grows.
 
-Nothing under `src/` should mention Rogue, GHD, or SM-2.5.
+### 2. Manufacturability rules (dispatch + construction)
 
-Initial concepts:
+Following the CVX analogy in `README.md`, rules are enforced at two layers:
 
-- **`Part`**
-  - Stable identity
-  - Manufacturing features rather than hand-authored mesh data
-- **`TubeSection`**
-  - Rectangular tube stock and saw-cut length
-- **`Hole`**
-  - Diameter, position, and drilling axis
-  - Stable identity shared by geometry generation and the hole table
-- **`RoundBar`**, added in slice 2
-  - Solid round stock and saw-cut length
-- **`Instance` and `Assembly`**, added in slice 2
-  - Instances reference parts and assign assembly-specific names and poses
-  - Assemblies preserve part identity rather than merging all geometry
+- **Dispatch** determines which operations apply to which stock kinds. Only
+  methods representing valid shop operations exist (`saw` and `drill` on
+  `AbstractPart{RectTube}`).
+- **Construction** validates physical dimensions and shop constraints before a
+  node can be created:
+  - `RectTube`: finite positive width, depth, wall thickness, and length; wall
+    thickness strictly less than half of width and depth (`2 * wall < min(w, d)`).
+  - `saw(part, length)`: finite positive target length strictly less than or
+    equal to the current part's length; cannot saw across an existing hole.
+  - `drill(part, Hole(diameter, z))`: finite positive hole diameter and position;
+    hole must fit within the inner tube wall width
+    (`diameter < width - 2 * wall`); hole must lie wholly within the tube ends
+    (`diameter / 2 < z < length - diameter / 2`); hole must not overlap an
+    existing hole along the tube.
 
-One upright cross-hole feature drives aligned openings in both the front and back
-walls. It must not become two unrelated hole features when geometry is derived.
+If any rule fails, the operation throws an `ArgumentError` or `DomainError`
+immediately and no node is constructed.
 
-Geometry is derived locally from each part. Assembly visualization reuses that
-geometry and applies instance transforms, avoiding separate meshes for identical
-left and right parts. Keep the type hierarchy shallow.
+### 3. The manufacturing graph
 
-### GHD application code
+Because every `OperatedPart` stores a reference to its `parent::AbstractPart`
+and the `op::AbstractOperation` that produced it, a part *is* a handle to its
+own manufacturing history — no global mutable graph is needed.
 
-The application owns everything Rogue-specific:
+- `graph(part)` (or `graph(parts...)`) walks parent links to collect the unique
+  part nodes and directed operation edges `(parent ──op──► child)` in
+  topological order.
+- Every node in the graph is a valid `AbstractPart` that can be passed directly
+  to `derive_mesh` or `visualize`.
+- Applying two different operations to the same `blank` naturally creates a fork
+  sharing the upstream nodes.
 
-- Concrete, typed Julia values for `UprightSpec` in slice 1 and `StandSpec` in
-  slice 2
-- `build_upright` and `build_stand`
-- Hole count, first-hole offset, and other layout decisions
-- Base-foot, lower-crossmember, and pull-up-bar dimensions
-- Assembly placement logic
-- Design/build scripts and application-level tests
-- Comments or source notes distinguishing published values from assumptions
+### 4. Coordinates and units
 
-BigArm supplies the modeling vocabulary; the application supplies product
-knowledge. Design directly in Julia for these slices. Do not introduce a generic
-parameter type, TOML loader, or parallel input schema yet.
+- Units: **inches**, `Float64`.
+- Right-handed local coordinates on `RectTube`:
+  - `Z`: along the tube length, from `0.0` at the base to `length` at the top.
+  - `X`: across the front/back face width (`-width/2` to `+width/2`).
+  - `Y`: across the tube depth (`-depth/2` to `+depth/2`), parallel to the
+    cross-hole drilling axis.
+- One `Drill(Hole(diameter, z))` operation represents a single cross-drilled
+  through-hole along the `Y` axis and produces aligned circular openings in both
+  the front (`+Y`) and back (`-Y`) walls.
 
-### Coordinates and units
+### 5. Derived geometry
 
-For the upright in slice 1:
+Geometry is a read of a part node, never stored as the source of truth:
 
-- Inches and `Float64`
-- Right-handed local coordinates
-- `Z`: upright length, with the base at `Z = 0`
-- `X`: upright width
-- `Y`: upright depth and circular cross-hole drilling axis
-- Local XY origin at the center of the tube cross-section
+- From any `AbstractPart{RectTube}`, collect its current `RectTube` dimensions
+  and all `Drill` operations in its ancestor chain.
+- Build the 2D outer/inner wall profiles, perforating the front and back outer
+  and inner wall faces with circular hole polygons at each drilled `z`.
+- Triangulate the perforated wall faces with `Triangulate.jl` and connect the
+  inner cylindrical hole barrels and end caps into a closed
+  `GeometryBasics.Mesh`.
 
-For the assembly in slice 2:
-
-- `X`: stand width
-- `Y`: stand depth
-- `Z`: vertical
-- Origin at the center of the footprint at floor level
-- Each part uses local coordinates and is positioned by its instance
-
-### Validation versus DFM
-
-Slice 1 validation is limited to structural and geometric checks:
-
-- Positive section dimensions, length, and wall thickness
-- Wall thickness compatible with the section size
-- Positive hole diameter and spacing
-- Holes contained within the upright length and face width
-- Valid first-hole offset and hole count
-- Finite values throughout the typed specification
-
-Slice 2 adds unique instance names and finite placement values. Visualization and
-the reference hole table remain available with unmeasured values. Provenance
-metadata and the fabrication measurement gate can be introduced with real
-fabrication outputs later.
-
-## Repository structure
+## Repository layout and dependencies
 
 ```text
 src/
   BigArm.jl
-  model.jl            Part, TubeSection, Hole; RoundBar later
-  geometry.jl         drilled profiles, triangulation, local meshes
-  visualization.jl    generic MeshCat adapter
-  assembly.jl         Instance and Assembly; added in slice 2
+  primitives.jl       AbstractPart, AbstractStock, AbstractOperation,
+                      RectTube, Hole, Saw, Drill, saw, drill
+  graph.jl            ManufacturingGraph, graph, hole_table, to_dot
+  geometry.jl         2D perforated wall profiles, triangulation, derive_mesh
+  visualization.jl    visualize(part) via MeshCat, visualize(graph) via Graphviz
 
 projects/ghd/
-  upright.jl          UprightSpec and build_upright
-  stand.jl            StandSpec and build_stand; added in slice 2
-  design.jl           concrete Julia specs and interactive entry point
+  upright.jl          UprightSpec and build_upright(spec)
+  design.jl           REPL entry point for building and visualizing the upright
 
 test/
   runtests.jl
-  model.jl
-  geometry.jl
-  ghd.jl              nonvisual end-to-end smoke tests
+  primitives.jl       rule enforcement, valid/invalid construction and dispatch
+  graph.jl            DAG traversal, node/edge identity, forks, DOT output
+  geometry.jl         mesh bounds, hole openings, intermediate-node meshing
+  ghd.jl              end-to-end upright smoke tests
 ```
 
-Slice 1 dependencies:
+Runtime dependencies to add when implementing Tasks 3 and 4:
 
 - `GeometryBasics`
 - `Triangulate`
 - `MeshCat`
-- `Test`
 
-Add `CoordinateTransformations` and `Rotations` for assembly placement in slice 2.
-Do not add LibGEOS, MeshIO, or STEP tooling until the corresponding functionality
-is implemented.
+Do not add `LibGEOS`, `MeshIO`, `FileIO`, `CoordinateTransformations`, or OCCT
+bridges during these tasks; rectangular walls with non-overlapping circular
+holes can be triangulated directly with `Triangulate.jl`.
 
-## Implementation steps
+## Tasks
 
-### Slice 1
+### Task 1: Primitives and manufacturability rules
 
-1. **Julia design specification**
-   - Define a typed, application-specific `UprightSpec` containing the upright
-     dimensions and hole-pattern values from `DIMENSIONS.md` and the reference
-     image.
-   - Instantiate it directly in `design.jl`; use comments or source notes to
-     identify assumed diameter, first-hole offset, hole count, and wall thickness.
-   - Test construction and validation without file I/O.
+- Define `AbstractStock`, `AbstractOperation`, `AbstractPart{S}`,
+  `StockPart{S}`, and `OperatedPart{S,O}`.
+- Implement `RectTube`, `Hole`, `Saw`, and `Drill`.
+- Implement `saw(part, length)` and `drill(part, hole)` with all dimensional and
+  shop-rule checks.
+- Write unit tests in `test/primitives.jl` covering valid chains and verifying
+  that invalid stock dimensions, oversized holes, out-of-bounds holes,
+  overlapping holes, and cuts across existing holes throw errors.
 
-2. **Feature model**
-   - Implement tube blanks, parts, and cross-hole features.
-   - Establish local-part coordinates and drilling-axis conventions.
-   - Test feature identity and parameter-driven pattern generation.
+### Task 2: Manufacturing graph and inspection reads
 
-3. **Derived drilled geometry**
-   - Generate rectangular front/back wall profiles containing circular holes.
-   - Triangulate the profiles and derive the hollow-tube mesh.
-   - Generate aligned openings in both walls from each cross-hole feature.
-   - Test hole count, spacing, alignment, and overall mesh bounds.
+- Implement `ManufacturingGraph` and `graph(parts...)` by walking parent links
+  and deduplicating shared ancestor nodes.
+- Implement `operations(part)` and `hole_table(part)` as reads of the graph.
+- Implement `to_dot(g::ManufacturingGraph)` to serialize nodes (stock/part
+  summaries) and edges (operation labels) in Graphviz DOT format.
+- Write unit tests in `test/graph.jl` verifying node counts, edge ordering,
+  shared-ancestor forks, hole-table readbacks, and DOT string generation.
 
-4. **Upright application and hole table**
-   - Implement `build_upright(spec)` using the typed Julia specification.
-   - Derive an in-memory hole table from the upright's hole features.
-   - Keep all product-specific dimensions and pattern decisions out of `src/`.
+### Task 3: Derived 2D/3D geometry
 
-5. **MeshCat visualization**
-   - Render the derived upright mesh with visible through-holes.
-   - Add basic material and camera framing without making MeshCat a modeling
-     dependency.
-   - Make `projects/ghd/design.jl` suitable for `includet` in a Revise session.
+- Implement 2D boundary and hole-loop construction for the four outer and four
+  inner faces of a `RectTube` part node.
+- Triangulate the perforated front and back faces with `Triangulate.jl`, mesh
+  the unperforated side walls and top/bottom end caps, and stitch the cylindrical
+  through-hole barrels connecting each outer wall to its inner wall.
+- Verify in `test/geometry.jl` that `derive_mesh` succeeds on the raw `stick`,
+  the sawn `blank`, an intermediate 1-hole part, and a multi-hole part, with
+  expected bounding boxes and watertight/valid triangle indices.
 
-6. **Slice 1 verification**
-   - Add a nonvisual smoke test: `UprightSpec` → upright → validation → drilled
-     mesh and hole table.
-   - Verify that changing diameter, spacing, offset, or count in the Julia spec
-     updates both geometry and hole table.
-   - Document the REPL workflow and schematic-model limitations.
+### Task 4: Geometry and graph visualization
 
-### Slice 2
+- Implement `visualize(part::AbstractPart)` to render `derive_mesh(part)` in
+  MeshCat with clear metal styling and camera framing.
+- Implement `visualize(g::ManufacturingGraph)` to render the DOT graph (to SVG
+  via `dot` when Graphviz is installed, with a clean text/DOT fallback in the
+  terminal).
+- Keep visualization decoupled from the primitive and graph definitions.
 
-7. **Assembly model**
-   - Implement round-bar blanks, instances, assemblies, and poses.
-   - Test part reuse and assembly placement.
+### Task 5: SM-2.5 upright model
 
-8. **Complete stand application**
-   - Implement `StandSpec` and `build_stand`.
-   - Reuse the perforated upright part for both upright instances.
-   - Add two base feet, one lower crossmember, and two pull-up bars.
+- In `projects/ghd/upright.jl`, define `UprightSpec` and `build_upright(spec)`
+  using `RectTube`, `saw`, and `drill`.
+- Record published SM-2.5 values from `DIMENSIONS.md` (3×3″ section, 11-gauge
+  ≈ 0.120″ wall, 103″ height, 1″ hole class on 2″ centers) and explicitly mark
+  assumed values (raw stick length, exact drilled diameter, first-hole offset,
+  hole count) in code comments.
+- Create `projects/ghd/design.jl` mirroring the `README.md` example so it can be
+  loaded with `includet("projects/ghd/design.jl")` in a Revise session.
 
-9. **Slice 2 verification**
-   - Add a nonvisual smoke test: `StandSpec` → assembly → validation → placed
-     meshes.
-   - Verify the seven-instance member layout against the reference image.
-   - Verify that identical parts share derived local geometry.
+### Task 6: End-to-end verification
+
+- Add `test/ghd.jl` to run the full upright pipeline without opening a browser:
+  `UprightSpec` → `build_upright` → `graph` → `hole_table` → `derive_mesh` →
+  `to_dot`.
+- Confirm that `julia --project=. -e 'using Pkg; Pkg.test()'` passes cleanly.
 
 ## Acceptance criteria
 
-### Slice 1
-
-The first slice is complete when this workflow displays one perforated upright:
-
-```sh
-julia --project=.
-```
+The plan is complete when the README example runs end to end:
 
 ```julia
 using Revise
 using BigArm
-includet("projects/ghd/design.jl")
+
+stick = RectTube(3.0, 3.0, 0.120, 288.0)
+blank = saw(stick, 103.0)
+
+upright = blank
+for z in 2.0:2.0:100.0
+    upright = drill(upright, Hole(1.0, z))
+end
+
+drill(upright, Hole(4.0, 51.0))  # throws
+
+visualize(upright)               # renders the perforated 3×3 tube in MeshCat
+visualize(graph(upright))        # renders stock → saw → 50 drills → upright
 ```
 
-Then:
+And:
 
-- The upright has real circular openings through its front and back walls.
-- The hole table agrees with the hole features and derived openings.
-- Editing upright or hole values in the Julia specification and rerunning the
-  design script updates the geometry and hole table.
-- Tests validate the nonvisual pipeline.
-- The application clearly reports which values are assumptions.
-- No side-keyhole, fabrication-ready, or exact-fit claim is produced.
-
-### Slice 2
-
-- MeshCat displays the complete schematic stand layout from the reference image.
-- Both uprights reuse the slice 1 part definition and hole pattern.
-- Editing the typed Julia specification updates the assembly.
-- Assembly and nonvisual end-to-end tests pass.
-- The model remains explicitly schematic and excludes undocumented joint and
-  keyhole details.
-
-## Later work
-
-After these slices, choose a fabrication-oriented part to prove the measurement
-gate and a real output path: feature model → DFM checks → DXF/hole table or other
-manufacturing artifact. If file-driven design becomes useful, add TOML only as an
-input adapter that constructs the same typed Julia specifications; do not make it
-a second source of modeling truth. Add exact keyhole geometry only after obtaining
-suitable profile dimensions or treating it as an explicitly assumed design study.
+- `visualize(stick)`, `visualize(blank)`, and `visualize(upright)` each render
+  the geometry at that point in the manufacturing sequence.
+- Nothing in `src/` references Rogue, GHD, or SM-2.5.
+- Every invalid shop operation tested in `test/primitives.jl` fails at
+  construction or dispatch before any node is added to the graph.
+- All tests pass via `Pkg.test()`.
