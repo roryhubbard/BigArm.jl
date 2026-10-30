@@ -38,8 +38,8 @@ plates, brackets, and tube sections.
 1. **Manufacturability by construction.** The modeling vocabulary is the shop's
    operation vocabulary. Unmanufacturable-by-these-means geometry is
    unrepresentable.
-2. **Operations are the model; geometry is derived.** A `Hole` is a first-class
-   object with a stable identity, made by an operation rather than
+2. **Operations are the model; geometry is derived.** A drilled hole is a
+   first-class operation in the graph with a stable identity, not something
    reverse-engineered from faces. The hole table, drill plan, and inspection
    sheet are *reads* of the model.
 3. **Tolerances are data.** Fit against mating hardware is checked across tolerance
@@ -168,12 +168,13 @@ using BigArm
 stick = RectangularTube(3.0, 3.0, 288.0, 0.120)  # 3×3″ 11-gauge tube, 24′ mill stick
 blank = saw(stick, 103.0)                        # cut to length, inches
 
+hole = Circle(1.0)
 upright = blank
-for z in 2.0:2.0:100.0                      # 2″ centers; first-hole offset assumed
-    upright = drill(upright, Hole(1.0, z))  # through the front and back walls
+for z in 2.0:2.0:100.0                           # 2″ centers; first-hole offset assumed
+    upright = drill(upright, hole, FaceDatum(:front, 0.0, z), ThroughAll())
 end
 
-drill(upright, Hole(4.0, 51.0))  # throws: a 4″ hole can't fit a 3″ face
+drill(upright, Circle(4.0), FaceDatum(:front, 0.0, 51.0), ThroughAll())  # throws: 4″ hole can't fit a 3″ face
 
 visualize(upright)               # the drilled tube in MeshCat
 visualize(graph(upright))        # stock → saw → 50 drills → upright

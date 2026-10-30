@@ -13,21 +13,40 @@
         @test isstock(stick)
         @test isempty(holes(stick))
 
-        h = Hole(1, 2)
-        @test h isa Hole
-        @test h.diameter === 1.0
-        @test h.z === 2.0
+        c = Circle(1)
+        @test c isa Circle
+        @test c isa AbstractProfile
+        @test c.diameter === 1.0
+
+        d = FaceDatum(:front, 2)
+        @test d isa FaceDatum
+        @test d isa AbstractDatum
+        @test d.face === :front
+        @test d.x === 0.0
+        @test d.z === 2.0
+        @test FaceDatum(:left, 0.5, 10).x === 0.5
+        @test FaceDatum(:left, 0.5, 10).z === 10.0
+
+        @test ThroughAll() === ThroughAll()
+        @test ThroughAll() isa AbstractPenetration
+        @test ThroughWall() === ThroughWall()
+        @test ThroughWall() isa AbstractPenetration
+        @test Blind(0.5) === Blind(0.5)
+        @test Blind(0.5).depth === 0.5
 
         s_op = Saw(103)
         @test s_op isa Saw
         @test s_op isa AbstractOperation
         @test s_op.length === 103.0
 
-        d_op = Drill(h)
-        @test d_op isa Drill
-        @test d_op isa AbstractOperation
-        @test d_op.hole === h
-        @test Drill(1.0, 2.0) === d_op
+        dr_op = Drill(c, d, ThroughAll())
+        @test dr_op isa Drill
+        @test dr_op isa AbstractOperation
+        @test dr_op.profile === c
+        @test dr_op.datum === d
+        @test dr_op.penetration === ThroughAll()
+        @test pierced_faces(dr_op) == (:front, :back)
+        @test pierced_faces(Drill(c, d, ThroughWall())) == (:front, nothing)
     end
 
     @testset "Invalid stock dimensions" begin
@@ -60,15 +79,24 @@
         @test_throws ArgumentError RectangularTube(3.0, 3.0, 103.0, 0.120, nothing, Saw(103.0))
     end
 
-    @testset "Invalid Hole and Saw construction" begin
-        @test_throws DomainError Hole(0.0, 5.0)
-        @test_throws DomainError Hole(-1.0, 5.0)
-        @test_throws DomainError Hole(NaN, 5.0)
-        @test_throws DomainError Hole(Inf, 5.0)
-        @test_throws DomainError Hole(1.0, 0.0)
-        @test_throws DomainError Hole(1.0, -2.0)
-        @test_throws DomainError Hole(1.0, NaN)
-        @test_throws DomainError Hole(1.0, Inf)
+    @testset "Invalid Circle, FaceDatum, Blind, and Saw construction" begin
+        @test_throws DomainError Circle(0.0)
+        @test_throws DomainError Circle(-1.0)
+        @test_throws DomainError Circle(NaN)
+        @test_throws DomainError Circle(Inf)
+
+        @test_throws ArgumentError FaceDatum(:top, 0.0, 5.0)
+        @test_throws ArgumentError FaceDatum(:bottom, 0.0, 5.0)
+        @test_throws ArgumentError FaceDatum(:invalid, 0.0, 5.0)
+        @test_throws DomainError FaceDatum(:front, NaN, 5.0)
+        @test_throws DomainError FaceDatum(:front, Inf, 5.0)
+        @test_throws DomainError FaceDatum(:front, 0.0, NaN)
+        @test_throws DomainError FaceDatum(:front, 0.0, Inf)
+
+        @test_throws DomainError Blind(0.0)
+        @test_throws DomainError Blind(-0.5)
+        @test_throws DomainError Blind(NaN)
+        @test_throws DomainError Blind(Inf)
 
         @test_throws DomainError Saw(0.0)
         @test_throws DomainError Saw(-10.0)
@@ -84,10 +112,7 @@
         @test !isstock(blank)
         @test blank.parent === stick
         @test blank.op === Saw(103.0)
-        @test blank.width === 3.0
-        @test blank.height === 3.0
         @test blank.length === 103.0
-        @test blank.wall === 0.120
         @test isempty(holes(blank))
 
         # Sawing to exact same length is permitted (length <= current length)
@@ -95,68 +120,99 @@
         @test same_len.length === 103.0
         @test same_len.parent === blank
 
-        # Sequential drilling
+        # Sequential ThroughAll drilling (default penetration)
+        hole = Circle(1.0)
         upright = blank
         for z in 2.0:2.0:100.0
-            upright = drill(upright, Hole(1.0, z))
+            upright = drill(upright, hole, FaceDatum(:front, 0.0, z))
         end
 
         @test upright isa RectangularTube
         @test !isstock(upright)
-        @test upright.op === Drill(Hole(1.0, 100.0))
+        @test upright.op === Drill(hole, FaceDatum(:front, 0.0, 100.0), ThroughAll())
         @test upright.length === 103.0
 
         drilled_holes = holes(upright)
         @test length(drilled_holes) == 50
-        @test first(drilled_holes) == Hole(1.0, 2.0)
-        @test last(drilled_holes) == Hole(1.0, 100.0)
+        @test first(drilled_holes) === Drill(hole, FaceDatum(:front, 0.0, 2.0), ThroughAll())
+        @test last(drilled_holes) === Drill(hole, FaceDatum(:front, 0.0, 100.0), ThroughAll())
 
         # Immutability of upstream nodes
         @test isstock(stick)
         @test stick.length === 288.0
         @test isempty(holes(blank))
 
+        # ThroughWall on left/right faces
+        p1 = drill(blank, hole, FaceDatum(:left, 0.0, 10.0), ThroughWall())
+        @test pierced_faces(p1.op) == (:left, nothing)
+        @test length(holes(p1)) == 1
+
         # Sawing a drilled part above all existing holes
-        p1 = drill(blank, Hole(1.0, 10.0))
         p2 = saw(p1, 50.0)
         @test p2.length === 50.0
         @test p2.parent === p1
         @test p2.op === Saw(50.0)
-        @test holes(p2) == [Hole(1.0, 10.0)]
+        @test length(holes(p2)) == 1
     end
 
-    @testset "Invalid holes: oversized, out-of-bounds, and overlapping" begin
+    @testset "Invalid holes: oversized, off-center, out-of-bounds, and overlapping" begin
         stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
         blank = saw(stick, 103.0)
-        inner_width = 3.0 - 2.0 * 0.120 # 2.76
+        inner_width = 3.0 - 2.0 * 0.120 # 2.76 (half = 1.38)
 
-        # Oversized holes (must satisfy diameter < width - 2 * wall)
-        @test_throws ArgumentError drill(blank, Hole(4.0, 51.0))
-        @test_throws ArgumentError drill(blank, Hole(3.0, 51.0))
-        @test_throws ArgumentError drill(blank, Hole(2.8, 51.0))
-        @test_throws ArgumentError drill(blank, Hole(inner_width, 51.0))
+        # Oversized holes (abs(x) + d/2 < face_width / 2 - wall = 1.38)
+        @test_throws ArgumentError drill(blank, Circle(4.0), FaceDatum(:front, 0.0, 51.0))
+        @test_throws ArgumentError drill(blank, Circle(3.0), FaceDatum(:front, 0.0, 51.0))
+        @test_throws ArgumentError drill(blank, Circle(inner_width), FaceDatum(:front, 0.0, 51.0)) # 1.38 < 1.38 fails
+        @test_throws ArgumentError drill(blank, Circle(2.8), FaceDatum(:front, 0.0, 51.0))
 
-        # Out-of-bounds holes (must satisfy diameter / 2 < z < length - diameter / 2)
-        @test_throws ArgumentError drill(blank, Hole(1.0, 0.5))   # tangent to bottom end (z == r)
-        @test_throws ArgumentError drill(blank, Hole(1.0, 0.25))  # breaks through bottom end (z < r)
-        @test_throws ArgumentError drill(blank, Hole(1.0, 102.5)) # tangent to top end (z == L - r)
-        @test_throws ArgumentError drill(blank, Hole(1.0, 102.8)) # breaks through top end (z > L - r)
-        @test_throws ArgumentError drill(blank, Hole(1.0, 103.0)) # centered on top end
-        @test_throws ArgumentError drill(blank, Hole(1.0, 150.0)) # beyond tube length
+        # Off-center holes (x too large)
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.88, 51.0))  # 0.88 + 0.5 = 1.38 fails
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 1.0, 51.0))   # 1.0 + 0.5 = 1.5 fails
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, -1.0, 51.0))  # abs(-1.0) + 0.5 = 1.5 fails
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:left, 0.88, 51.0))   # same bound on side faces
 
-        # Overlapping holes
-        p1 = drill(blank, Hole(1.0, 20.0))
-        @test_throws ArgumentError drill(p1, Hole(1.0, 20.0))     # concentric duplicate
-        @test_throws ArgumentError drill(p1, Hole(1.0, 20.5))     # partial overlap
-        @test_throws ArgumentError drill(p1, Hole(1.0, 19.5))     # partial overlap below
-        @test_throws ArgumentError drill(p1, Hole(1.0, 21.0))     # tangent (zero web between holes)
-        @test_throws ArgumentError drill(p1, Hole(1.0, 19.0))     # tangent below
-        @test_throws ArgumentError drill(p1, Hole(2.0, 21.5))     # tangent with different diameters ((1+2)/2 == 1.5)
-        @test_throws ArgumentError drill(p1, Hole(2.0, 21.2))     # overlap with different diameters
+        # Valid off-center hole just inside the inner cavity edge
+        valid_offcenter = drill(blank, Circle(1.0), FaceDatum(:front, 0.87, 51.0)) # 0.87 + 0.5 = 1.37 < 1.38
+        @test length(holes(valid_offcenter)) == 1
 
-        # Non-overlapping hole just past tangent succeeds
-        p2 = drill(p1, Hole(1.0, 21.01))
-        @test length(holes(p2)) == 2
+        # Out-of-bounds holes (d/2 < z < length - d/2)
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 0.5))
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 0.25))
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, -1.0))
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 102.5))
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 102.8))
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 103.0))
+        @test_throws ArgumentError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 150.0))
+
+        # Overlapping holes on the same face
+        p1 = drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 20.0))
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:front, 0.0, 20.0))     # duplicate
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:front, 0.0, 20.5))     # overlap in z
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:front, 0.0, 19.5))     # overlap in z below
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:front, 0.0, 21.0))     # tangent in z
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:front, 0.5, 20.0))     # overlap in x at same z
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:front, 0.3, 20.3))     # overlap diagonally
+        @test_throws ArgumentError drill(p1, Circle(2.0), FaceDatum(:front, 0.0, 21.5))     # tangent with different diameters
+
+        # ThroughWall pierces only datum face; ThroughAll pierces opposite wall too
+        tw_blank = saw(RectangularTube(3.0, 3.0, 288.0, 0.120), 103.0)
+        tw_front = drill(tw_blank, Circle(1.0), FaceDatum(:front, 0.0, 20.0), ThroughWall())
+        # Drilling the opposite wall at the same z is allowed since the first cut
+        # pierced only :front into the cavity.
+        tw_back = drill(tw_front, Circle(1.0), FaceDatum(:back, 0.0, 20.0), ThroughWall())
+        @test length(holes(tw_back)) == 2
+        @test_throws ArgumentError drill(tw_back, Circle(1.0), FaceDatum(:back, 0.0, 20.0), ThroughWall())
+        @test_throws ArgumentError drill(tw_front, Circle(1.0), FaceDatum(:back, 0.0, 20.0), ThroughAll())
+        @test_throws ArgumentError drill(tw_front, Circle(1.0), FaceDatum(:front, 0.0, 20.5), ThroughWall())
+
+        # ThroughAll on :front occupies both walls
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:back, 0.0, 20.0), ThroughAll())
+        @test_throws ArgumentError drill(p1, Circle(1.0), FaceDatum(:back, 0.0, 20.5), ThroughWall())
+
+        # Same-face offset that avoids overlap in (x, z) even at same z
+        offset_ok = drill(p1, Circle(0.5), FaceDatum(:front, 1.1, 20.0)) # sqrt(1.1^2) > (1.0+0.5)/2 = 0.75
+        @test length(holes(offset_ok)) == 2
     end
 
     @testset "Invalid saw cuts" begin
@@ -175,21 +231,29 @@
         @test_throws DomainError saw(blank, Inf)
 
         # Cuts across or below existing holes (hole at z = 50.0, d = 1.0 spans [49.5, 50.5])
-        drilled = drill(blank, Hole(1.0, 50.0))
-        @test_throws ArgumentError saw(drilled, 50.0)  # through hole center
-        @test_throws ArgumentError saw(drilled, 50.2)  # through upper half of hole
-        @test_throws ArgumentError saw(drilled, 49.8)  # through lower half of hole
-        @test_throws ArgumentError saw(drilled, 50.5)  # tangent to top edge of hole
-        @test_throws ArgumentError saw(drilled, 49.5)  # tangent to bottom edge of hole
-        @test_throws ArgumentError saw(drilled, 30.0)  # below existing hole
+        drilled = drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 50.0))
+        @test_throws ArgumentError saw(drilled, 50.0)
+        @test_throws ArgumentError saw(drilled, 50.2)
+        @test_throws ArgumentError saw(drilled, 49.8)
+        @test_throws ArgumentError saw(drilled, 50.5)
+        @test_throws ArgumentError saw(drilled, 49.5)
+        @test_throws ArgumentError saw(drilled, 30.0)
     end
 
-    @testset "Dispatch enforcement on unsupported part kinds" begin
+    @testset "Dispatch enforcement" begin
         struct UnsupportedPart <: AbstractPart end
         struct UnsupportedTube <: AbstractTube end
+        struct SquareProfile <: AbstractProfile end
 
+        blank = saw(RectangularTube(3.0, 3.0, 288.0, 0.120), 103.0)
+
+        # Unsupported parts
         @test_throws MethodError saw(UnsupportedPart(), 10.0)
-        @test_throws MethodError drill(UnsupportedPart(), Hole(1.0, 2.0))
-        @test_throws MethodError drill(UnsupportedTube(), Hole(1.0, 2.0))
+        @test_throws MethodError drill(UnsupportedPart(), Circle(1.0), FaceDatum(:front, 0.0, 2.0))
+        @test_throws MethodError drill(UnsupportedTube(), Circle(1.0), FaceDatum(:front, 0.0, 2.0))
+
+        # Non-circular profiles and Blind penetration on a thin-wall tube fail by dispatch
+        @test_throws MethodError drill(blank, SquareProfile(), FaceDatum(:front, 0.0, 2.0))
+        @test_throws MethodError drill(blank, Circle(1.0), FaceDatum(:front, 0.0, 2.0), Blind(0.5))
     end
 end

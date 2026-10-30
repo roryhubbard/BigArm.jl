@@ -1,7 +1,7 @@
 """
     AbstractPart
 
-Supertype for all nodes in a manufacturing graph.
+Supertype for the workpiece in the machine (nodes in a manufacturing graph).
 """
 abstract type AbstractPart end
 
@@ -13,9 +13,30 @@ Supertype for tubular parts.
 abstract type AbstractTube <: AbstractPart end
 
 """
+    AbstractProfile
+
+Supertype for pure 2D shapes cut in a datum face's plane.
+"""
+abstract type AbstractProfile end
+
+"""
+    AbstractDatum
+
+Supertype for locations on a part (face/axis and coordinates).
+"""
+abstract type AbstractDatum end
+
+"""
+    AbstractPenetration
+
+Supertype for discrete cut penetration / termination modes.
+"""
+abstract type AbstractPenetration end
+
+"""
     AbstractOperation
 
-Supertype for shop manufacturing operations applied to parts.
+Supertype for shop actions applied to parts.
 """
 abstract type AbstractOperation end
 
@@ -63,29 +84,77 @@ struct RectangularTube <: AbstractTube
 end
 
 """
-    isstock(part::AbstractPart) -> Bool
+    Circle(diameter)
 
-Return `true` if `part` is raw mill stock (a root node with `parent === nothing`).
+Circular 2D cut profile with finite positive `diameter` (inches, `Float64`).
 """
-isstock(p::AbstractPart) = isnothing(p.parent)
-
-"""
-    Hole(diameter, z)
-
-Cross-drilled circular through-hole specification with `diameter` and center
-position `z` along the tube length (inches, `Float64`), drilled along the Y axis
-through the front (`+Y`) and back (`-Y`) walls.
-"""
-struct Hole
+struct Circle <: AbstractProfile
     diameter::Float64
+
+    function Circle(diameter::Real)
+        d = Float64(diameter)
+        (isfinite(d) && d > 0.0) || throw(DomainError(diameter, "Circle diameter must be finite and positive"))
+        return new(d)
+    end
+end
+
+const VALID_FACES = (:front, :back, :left, :right)
+
+"""
+    FaceDatum(face, x=0.0, z)
+
+Location on a part face with valid `face::Symbol`
+(`:front`, `:back`, `:left`, `:right`), horizontal offset `x` from the face
+centerline, and axial position `z` from the base (`Z = 0`), in inches
+(`Float64`).
+"""
+struct FaceDatum <: AbstractDatum
+    face::Symbol
+    x::Float64
     z::Float64
 
-    function Hole(diameter::Real, z::Real)
-        d = Float64(diameter)
+    function FaceDatum(face::Symbol, x::Real, z::Real)
+        face in VALID_FACES || throw(
+            ArgumentError("Invalid face :$face; must be one of :front, :back, :left, :right"),
+        )
+        xf = Float64(x)
         zf = Float64(z)
-        (isfinite(d) && d > 0.0) || throw(DomainError(diameter, "Hole diameter must be finite and positive"))
-        (isfinite(zf) && zf > 0.0) || throw(DomainError(z, "Hole z position must be finite and positive"))
-        return new(d, zf)
+        isfinite(xf) || throw(DomainError(x, "FaceDatum x must be finite"))
+        isfinite(zf) || throw(DomainError(z, "FaceDatum z must be finite"))
+        return new(face, xf, zf)
+    end
+end
+
+FaceDatum(face::Symbol, z::Real) = FaceDatum(face, 0.0, z)
+
+"""
+    ThroughAll()
+
+Singleton penetration mode: cut through the entire cross-section (both datum
+and opposite walls).
+"""
+struct ThroughAll <: AbstractPenetration end
+
+"""
+    ThroughWall()
+
+Singleton penetration mode: cut through the datum wall into the cavity only.
+"""
+struct ThroughWall <: AbstractPenetration end
+
+"""
+    Blind(depth)
+
+Blind-hole penetration of `depth` (inches, `Float64`) for solid stock. Not valid
+on thin-wall tubes.
+"""
+struct Blind <: AbstractPenetration
+    depth::Float64
+
+    function Blind(depth::Real)
+        d = Float64(depth)
+        (isfinite(d) && d > 0.0) || throw(DomainError(depth, "Blind depth must be finite and positive"))
+        return new(d)
     end
 end
 
@@ -105,29 +174,36 @@ struct Saw <: AbstractOperation
 end
 
 """
-    Drill(hole::Hole)
+    Drill(profile::Circle, datum::FaceDatum, penetration::AbstractPenetration)
 
-Cross-drilling operation applying `hole` to a part.
+Drilling operation cutting `profile` at `datum` with `penetration` mode.
 """
 struct Drill <: AbstractOperation
-    hole::Hole
+    profile::Circle
+    datum::FaceDatum
+    penetration::AbstractPenetration
 end
 
-Drill(diameter::Real, z::Real) = Drill(Hole(diameter, z))
+"""
+    isstock(part::AbstractPart) -> Bool
+
+Return `true` if `part` is raw mill stock (a root node with `parent === nothing`).
+"""
+isstock(p::AbstractPart) = isnothing(p.parent)
 
 """
-    holes(part::AbstractPart) -> Vector{Hole}
+    holes(part::AbstractPart) -> Vector{Drill}
 
-Collect all `Hole`s drilled in the ancestor chain of `part` in chronological
+Collect all `Drill` operations in the ancestor chain of `part` in chronological
 order (from root stock to `part`).
 """
 function holes(part::AbstractPart)
-    result = Hole[]
+    result = Drill[]
     curr = part
     while !isnothing(curr)
         op = curr.op
         if op isa Drill
-            push!(result, op.hole)
+            push!(result, op)
         end
         curr = curr.parent
     end
@@ -135,8 +211,24 @@ function holes(part::AbstractPart)
     return result
 end
 
-_sawn_tube(part::RectangularTube, target::Float64, op::Saw) =
-    RectangularTube(part.width, part.height, target, part.wall, part, op)
+_face_width(part::RectangularTube, face::Symbol) =
+    (face === :front || face === :back) ? part.width : part.height
+
+_opposite_face(face::Symbol) =
+    face === :front ? :back :
+    face === :back ? :front :
+    face === :left ? :right : :left
+
+"""
+    pierced_faces(op::Drill) -> NTuple{2,Symbol}
+
+Faces pierced by drilling operation `op`: only `op.datum.face` for `ThroughWall`
+(with a `nothing` second entry), or both `op.datum.face` and its opposite wall
+for `ThroughAll`.
+"""
+pierced_faces(op::Drill) =
+    op.penetration isa ThroughWall ? (op.datum.face, nothing) :
+    (op.datum.face, _opposite_face(op.datum.face))
 
 """
     saw(part::AbstractTube, length::Real)
@@ -150,53 +242,80 @@ function saw(part::AbstractTube, op::Saw)
     target <= part.length || throw(
         ArgumentError("Cannot saw tube of length $(part.length) to longer target length $target"),
     )
-    for h in holes(part)
-        r = h.diameter / 2.0
-        if target <= h.z + r
+    for drill_op in holes(part)
+        r = drill_op.profile.diameter / 2.0
+        if target <= drill_op.datum.z + r
             throw(
                 ArgumentError(
-                    "Cannot saw at length $target across or below existing hole at z=$(h.z) (diameter=$(h.diameter))",
+                    "Cannot saw at length $target across or below existing hole at z=$(drill_op.datum.z) (diameter=$(drill_op.profile.diameter))",
                 ),
             )
         end
     end
-    return _sawn_tube(part, target, op)
+    return RectangularTube(part.width, part.height, target, part.wall, part, op)
 end
 
 saw(part::AbstractTube, length::Real) = saw(part, Saw(length))
 
 """
-    drill(part::RectangularTube, hole::Hole)
+    drill(
+        part::RectangularTube,
+        profile::Circle,
+        datum::FaceDatum,
+        penetration::Union{ThroughAll,ThroughWall}=ThroughAll(),
+    )
 
-Cross-drill `hole` through the front and back walls of `part`.
-Validates that the hole fits within the inner wall width
-(`diameter < width - 2 * wall`), lies wholly within the tube ends
-(`diameter / 2 < z < length - diameter / 2`), and does not overlap any existing
-hole along the tube.
+Drill circular `profile` into `part` at `datum`. Validates that the circle fits
+strictly within the inner cavity width of that face
+(`abs(datum.x) + diameter / 2 < face_width / 2 - wall`), lies wholly within the
+tube ends (`diameter / 2 < datum.z < length - diameter / 2`), and does not
+overlap any existing hole on any wall it pierces.
 """
-function drill(part::RectangularTube, op::Drill)
-    h = op.hole
-    inner_width = part.width - 2.0 * part.wall
-    h.diameter < inner_width || throw(
+function drill(
+    part::RectangularTube,
+    profile::Circle,
+    datum::FaceDatum,
+    penetration::Union{ThroughAll,ThroughWall},
+)
+    r = profile.diameter / 2.0
+    face_width = _face_width(part, datum.face)
+    inner_width = face_width - 2.0 * part.wall
+    abs(datum.x) + r < inner_width / 2.0 || throw(
         ArgumentError(
-            "Hole diameter ($(h.diameter)) must be strictly less than inner tube width ($inner_width)",
+            "Circle (diameter=$(profile.diameter)) at x=$(datum.x) on face :$(datum.face) must fit strictly within inner cavity width ($inner_width)",
         ),
     )
-    r = h.diameter / 2.0
-    (r < h.z && h.z < part.length - r) || throw(
+    (r < datum.z && datum.z < part.length - r) || throw(
         ArgumentError(
-            "Hole (diameter=$(h.diameter), z=$(h.z)) must lie wholly within tube ends (0.0, $(part.length))",
+            "Hole (diameter=$(profile.diameter), z=$(datum.z)) must lie wholly within tube ends (0.0, $(part.length))",
         ),
     )
+
+    op = Drill(profile, datum, penetration)
+    new_faces = pierced_faces(op)
     for existing in holes(part)
-        min_center_dist = (h.diameter + existing.diameter) / 2.0
-        abs(h.z - existing.z) > min_center_dist || throw(
-            ArgumentError(
-                "Hole at z=$(h.z) (diameter=$(h.diameter)) overlaps existing hole at z=$(existing.z) (diameter=$(existing.diameter))",
-            ),
-        )
+        existing_faces = pierced_faces(existing)
+        same_face = datum.face == existing.datum.face
+        if same_face || new_faces[2] in existing_faces || existing_faces[2] in new_faces
+            min_center_dist = r + existing.profile.diameter / 2.0
+            intersects = if same_face
+                # Circles on the same planar wall must not intersect in 2D.
+                hypot(datum.x - existing.datum.x, datum.z - existing.datum.z) <= min_center_dist
+            else
+                # ThroughWall on one wall and ThroughWall on the opposite wall
+                # pierce different wall material (into the same open cavity).
+                penetration isa ThroughWall && existing.penetration isa ThroughWall ?
+                false : abs(datum.z - existing.datum.z) <= min_center_dist
+            end
+            intersects && throw(
+                ArgumentError(
+                    "Hole at (face=:$(datum.face), x=$(datum.x), z=$(datum.z)) overlaps existing hole at (face=:$(existing.datum.face), x=$(existing.datum.x), z=$(existing.datum.z))",
+                ),
+            )
+        end
     end
     return RectangularTube(part.width, part.height, part.length, part.wall, part, op)
 end
 
-drill(part::RectangularTube, hole::Hole) = drill(part, Drill(hole))
+drill(part::RectangularTube, profile::Circle, datum::FaceDatum) =
+    drill(part, profile, datum, ThroughAll())

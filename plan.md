@@ -18,8 +18,10 @@ this plan.
 - A small, general-purpose set of primitives in `src/` with a shallow type
   hierarchy and plain structs at the leaves
 - Manufacturability rules enforced by multiple dispatch and struct construction
-- Raw rectangular-tube mill stock (`RectangularTube`), a cutoff operation (`saw`), and
-  a cross-drilling operation (`drill` with `Hole`)
+- Raw rectangular-tube mill stock (`RectangularTube`), a 2D circular profile
+  (`Circle`), a face datum (`FaceDatum`), discrete penetration modes
+  (`ThroughAll`, `ThroughWall`, `Blind`), a cutoff operation (`saw`), and a
+  drilling operation (`drill`)
 - Immutable part nodes where each operation takes a part and returns a new part,
   forming a directed acyclic manufacturing graph
 - Derived 3D mesh geometry for any part node in the graph (raw stick, sawn
@@ -51,7 +53,7 @@ stick = RectangularTube(...)
         ▼  saw(stick, L)
       blank
         │
-        ▼  drill(blank, Hole(...))   × N
+        ▼  drill(blank, Circle(d), FaceDatum(:front, 0.0, z), ThroughAll())   × N
      upright
         │
         ├──► derive_mesh(part) ──► MeshCat
@@ -62,19 +64,34 @@ stick = RectangularTube(...)
 ### 1. Primitives and type hierarchy
 
 Nothing under `src/` mentions Rogue, GHD, or SM-2.5. Primitives are named for
-what they are in CAD/CAM, with two root abstract types and plain structs at the
-leaves:
+what they are in CAD/CAM, organized around a small set of orthogonal root
+abstract types with plain structs at the leaves:
+
+1. **`AbstractPart`** — what workpiece is in the machine
+2. **`AbstractProfile`** — what 2D shape is being cut
+3. **`AbstractDatum`** — where on the part (face/axis and coordinates)
+4. **`AbstractPenetration`** — discrete cut penetration / termination mode
+5. **`AbstractOperation`** — what shop action is performed
 
 ```text
 AbstractPart
 └── AbstractTube
     └── RectangularTube   # width, height, length, wall, parent, op
 
-AbstractOperation
-├── Saw                   # target cut length
-└── Drill                 # Hole applied to a part
+AbstractProfile           # pure 2D shape in a datum face's plane
+└── Circle                # diameter
 
-Hole                      # diameter, z position
+AbstractDatum             # location on a part
+└── FaceDatum             # face::Symbol, x::Float64, z::Float64
+
+AbstractPenetration       # discrete cut penetration mode
+├── ThroughAll            # singleton: through the entire cross-section (both walls)
+├── ThroughWall           # singleton: through the datum wall into the cavity only
+└── Blind                 # depth::Float64 (for solid stock; not valid on thin-wall tube)
+
+AbstractOperation         # shop action applied to a part
+├── Saw                   # length::Float64
+└── Drill                 # profile::Circle, datum::FaceDatum, penetration::AbstractPenetration
 ```
 
 Raw mill stock is not a separate type; it is simply a root `AbstractPart` whose
@@ -83,30 +100,67 @@ Raw mill stock is not a separate type; it is simply a root `AbstractPart` whose
 linked to the previous one, every intermediate and final node keeps its concrete
 part type without needing wrapper structs or type parameters.
 
+Separating `Circle` (`AbstractProfile`), `FaceDatum` (`AbstractDatum`), and
+`AbstractPenetration` keeps cut shapes reusable across parts and faces, and
+models penetration the way drawings and shops actually specify it (`ThroughAll()`,
+`ThroughWall()`, `Blind(d)`) without any type parameters on `Drill`.
+
 ### 2. Manufacturability rules (dispatch + construction)
 
 Following the CVX analogy in `README.md`, rules are enforced at two layers:
 
-- **Dispatch** determines which operations apply to which parts. Only methods
-  representing valid shop operations exist (`saw(::AbstractTube, length)` and
-  `drill(::RectangularTube, ::Hole)`).
-- **Construction** validates physical dimensions and shop constraints before a
-  new part node can be created:
+- **Dispatch** determines which operations, profiles, datums, and penetrations
+  compose:
+  - `saw(::AbstractTube, length)`
+  - `drill(::RectangularTube, ::Circle, ::FaceDatum, ::Union{ThroughAll,ThroughWall})`
+    (with convenience `drill(part, circle, datum)` defaulting to `ThroughAll()`).
+    Twist drills only cut `Circle` profiles, and thin-walled `RectangularTube`
+    only permits through-wall penetration (`ThroughAll` or `ThroughWall`) —
+    passing a non-circular profile or `Blind(depth)` fails by dispatch
+    (`MethodError`).
+- **Construction** validates physical dimensions, datum bounds, and shop
+  constraints before a new part node can be created:
   - `RectangularTube`: finite positive width, height, length, and wall thickness;
     wall thickness strictly less than half of width and height
     (`2 * wall < min(w, h)`).
+  - `Circle(diameter)`: finite positive diameter.
+  - `FaceDatum(face, x, z)` (with convenience `FaceDatum(face, z)` defaulting
+    `x = 0.0`): valid datum face symbol (`:front`, `:back`, `:left`, `:right`)
+    and finite coordinates.
+  - `Blind(depth)`: finite positive depth.
   - `saw(part, length)`: finite positive target length strictly less than or
     equal to the current part's length; cannot saw across an existing hole.
-  - `drill(part, Hole(diameter, z))`: finite positive hole diameter and position;
-    hole must fit within the inner tube wall width
-    (`diameter < width - 2 * wall`); hole must lie wholly within the tube ends
-    (`diameter / 2 < z < length - diameter / 2`); hole must not overlap an
-    existing hole along the tube.
+  - `drill(part, circle, datum, penetration)`: the datum face must exist on
+    `part`; the circle centered at `(datum.x, datum.z)` must fit strictly within
+    the inner cavity width of that face
+    (`abs(datum.x) + diameter / 2 < face_width / 2 - wall`); the hole must lie
+    wholly within the tube ends
+    (`diameter / 2 < datum.z < length - diameter / 2`); and the hole must not
+    overlap any existing hole on any wall it pierces (`ThroughWall` pierces only
+    `datum.face`; `ThroughAll` pierces both `datum.face` and the opposite wall).
 
 If any rule fails, the operation throws an `ArgumentError` or `DomainError`
 immediately and no node is constructed.
 
-### 3. The manufacturing graph
+### 3. How datums evolve across operations
+
+`FaceDatum` is a stateless coordinate specification; the `AbstractPart` node and
+its ancestor chain track how valid datum bounds and surfaces change as
+operations are applied:
+
+- **Stock bounds update on the part node:** `saw(stick, 103.0)` returns a new
+  `RectangularTube` with `length = 103.0`, which immediately updates the valid
+  `z ∈ (0, 103.0)` range of `:front`, `:back`, `:left`, and `:right` for all
+  subsequent operations.
+- **Material removal is tracked in the ancestor chain:** `drill` walks
+  `part.parent` to check existing `Drill` operations on the same axis so new
+  cuts cannot collide with prior cuts, and `saw` walks `part.parent` so a cutoff
+  cannot slice through an existing hole.
+- **Setup tracking:** because each `Drill` records its `FaceDatum`, the
+  manufacturing graph can read setup changes directly from the sequence of datum
+  faces.
+
+### 4. The manufacturing graph
 
 Because every part node stores its `parent::Union{Nothing,AbstractPart}` and the
 `op::Union{Nothing,AbstractOperation}` that produced it, a part *is* a handle to
@@ -120,26 +174,30 @@ its own manufacturing history — no global mutable graph is needed.
 - Applying two different operations to the same `blank` naturally creates a fork
   sharing the upstream nodes.
 
-### 4. Coordinates and units
+### 5. Coordinates and units
 
 - Units: **inches**, `Float64`.
 - Right-handed local coordinates on `RectangularTube`:
   - `Z`: along the tube length, from `0.0` at the base to `length` at the top.
-  - `X`: across the front/back face width (`-width/2` to `+width/2`).
-  - `Y`: across the tube cross-section height (`-height/2` to `+height/2`),
-    parallel to the cross-hole drilling axis.
-- One `Drill(Hole(diameter, z))` operation represents a single cross-drilled
-  through-hole along the `Y` axis and produces aligned circular openings in both
-  the front (`+Y`) and back (`-Y`) walls.
+  - `X`: across the `:front` / `:back` face width (`-width/2` to `+width/2`).
+  - `Y`: across the tube cross-section height (`-height/2` to `+height/2`,
+    spanning the `:left` and `:right` faces).
+- On a `FaceDatum(face, x, z)`, `x` is the horizontal offset from the face
+  centerline and `z` is the axial position from the base (`Z = 0`).
+- `Drill(Circle(diameter), FaceDatum(:front, x, z), ThroughAll())` represents a
+  cross-drilled hole entering `:front` (`+Y`) and exiting `:back` (`-Y`),
+  producing aligned circular openings in both walls; with `ThroughWall()`, it
+  pierces only the `:front` wall into the tube cavity.
 
-### 5. Derived geometry
+### 6. Derived geometry
 
 Geometry is a read of a part node, never stored as the source of truth:
 
 - From any `RectangularTube`, collect its dimensions and all `Drill` operations
   in its ancestor chain.
-- Build the 2D outer/inner wall profiles, perforating the front and back outer
-  and inner wall faces with circular hole polygons at each drilled `z`.
+- Build the 2D outer/inner wall profiles, perforating each wall pierced by a
+  `Drill` (`datum.face` for `ThroughWall`; both `datum.face` and its opposite
+  face for `ThroughAll`) with circular hole polygons at `(x, z)`.
 - Triangulate the perforated wall faces with `Triangulate.jl` and connect the
   inner cylindrical hole barrels and end caps into a closed
   `GeometryBasics.Mesh`.
@@ -149,8 +207,10 @@ Geometry is a read of a part node, never stored as the source of truth:
 ```text
 src/
   BigArm.jl
-  primitives.jl       AbstractPart, AbstractTube, AbstractOperation,
-                      RectangularTube, Hole, Saw, Drill, isstock, saw, drill
+  primitives.jl       AbstractPart, AbstractTube, AbstractProfile,
+                      AbstractDatum, AbstractPenetration, AbstractOperation,
+                      RectangularTube, Circle, FaceDatum, ThroughAll,
+                      ThroughWall, Blind, Saw, Drill, isstock, holes, saw, drill
   graph.jl            ManufacturingGraph, graph, hole_table, to_dot
   geometry.jl         2D perforated wall profiles, triangulation, derive_mesh
   visualization.jl    visualize(part) via MeshCat, visualize(graph) via Graphviz
@@ -181,13 +241,19 @@ holes can be triangulated directly with `Triangulate.jl`.
 
 ### Task 1: Primitives and manufacturability rules
 
-- Define `AbstractPart`, `AbstractTube`, and `AbstractOperation`.
-- Implement `RectangularTube`, `Hole`, `Saw`, `Drill`, and `isstock`.
+- Define the root abstract types: `AbstractPart` (with `AbstractTube`),
+  `AbstractProfile`, `AbstractDatum`, `AbstractPenetration`, and
+  `AbstractOperation`.
+- Implement `RectangularTube`, `Circle`, `FaceDatum`, `ThroughAll`,
+  `ThroughWall`, `Blind`, `Saw`, `Drill`, `isstock`, and `holes`.
 - Implement `saw(part::AbstractTube, length)` and
-  `drill(part::RectangularTube, hole)` with all dimensional and shop-rule checks.
-- Write unit tests in `test/primitives.jl` covering valid chains and verifying
-  that invalid stock dimensions, oversized holes, out-of-bounds holes,
-  overlapping holes, and cuts across existing holes throw errors.
+  `drill(part::RectangularTube, profile::Circle, datum::FaceDatum, penetration::Union{ThroughAll,ThroughWall}=ThroughAll())`
+  with all dimensional, datum-bound, and shop-rule checks.
+- Write unit tests in `test/primitives.jl` covering valid chains (`ThroughAll`
+  and `ThroughWall`) and verifying that invalid stock dimensions, invalid faces,
+  `Blind` penetration on a tube (`MethodError`), oversized or off-center holes,
+  out-of-bounds holes, overlapping holes, and cuts across existing holes throw
+  errors.
 
 ### Task 2: Manufacturing graph and inspection reads
 
@@ -222,7 +288,8 @@ holes can be triangulated directly with `Triangulate.jl`.
 ### Task 5: SM-2.5 upright model
 
 - In `projects/ghd/upright.jl`, define `UprightSpec` and `build_upright(spec)`
-  using `RectangularTube`, `saw`, and `drill`.
+  using `RectangularTube`, `Circle`, `FaceDatum`, `ThroughAll`, `saw`, and
+  `drill`.
 - Record published SM-2.5 values from `DIMENSIONS.md` (3×3″ section, 11-gauge
   ≈ 0.120″ wall, 103″ height, 1″ hole class on 2″ centers) and explicitly mark
   assumed values (raw stick length, exact drilled diameter, first-hole offset,
@@ -248,12 +315,13 @@ using BigArm
 stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
 blank = saw(stick, 103.0)
 
+hole = Circle(1.0)
 upright = blank
 for z in 2.0:2.0:100.0
-    upright = drill(upright, Hole(1.0, z))
+    upright = drill(upright, hole, FaceDatum(:front, 0.0, z), ThroughAll())
 end
 
-drill(upright, Hole(4.0, 51.0))  # throws
+drill(upright, Circle(4.0), FaceDatum(:front, 0.0, 51.0), ThroughAll())  # throws
 
 visualize(upright)               # renders the perforated 3×3 tube in MeshCat
 visualize(graph(upright))        # renders stock → saw → 50 drills → upright
