@@ -1,8 +1,8 @@
 module BigArm
 
-using CoordinateTransformations: AffineMap, LinearMap, Transformation, Translation
-using LinearAlgebra: dot, norm
-using Rotations: RotMatrix3, RotX, RotY, RotZ, isrotation
+using CoordinateTransformations: AffineMap, LinearMap, Translation
+using LinearAlgebra: dot, norm, normalize
+using Rotations: Rotation, RotX, RotZ
 using StaticArrays: SVector
 
 export AbstractPart,
@@ -21,21 +21,12 @@ export AbstractPart,
     Drill,
     isstock,
     origin,
-    x_axis,
-    y_axis,
-    z_axis,
-    translate,
-    local_coords,
+    xaxis,
+    yaxis,
+    zaxis,
     datums,
     datum,
-    front,
-    back,
-    right,
-    left,
-    top,
-    bottom,
     holes,
-    pierced_walls,
     saw,
     drill
 

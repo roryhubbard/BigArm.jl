@@ -53,7 +53,7 @@ stick = RectangularTube(...)
         ▼  saw(stick, L)
       blank
         │
-        ▼  drill(blank, Circle(d), front(blank, 1.5, y), ThroughAll())   × N
+        ▼  drill(blank, Circle(d), Datum(...), ThroughAll())   × N
      upright
         │
         ├──► derive_mesh(part) ──► MeshCat
@@ -76,7 +76,7 @@ abstract types with plain structs at the leaves:
 ```text
 AbstractPart
 └── AbstractTube
-    └── RectangularTube   # width, height, length, wall, parent, op
+    └── RectangularTube   # width, height, length, thickness, parent, op
 
 AbstractProfile           # pure 2D shape in a datum's XY plane
 └── Circle                # diameter
@@ -117,31 +117,27 @@ Following the CVX analogy in `README.md`, rules are enforced at two layers:
   new part node can be created:
   - Stock dimensions and cut parameters must be physically valid (e.g., tube wall
     thickness fits inside the outer cross-section).
-  - `saw` can only shorten a part and cannot cut across an existing hole.
-  - `drill` requires a datum lying on a valid wall of the part, a hole that fits
-    inside the wall's inner cavity and tube ends, and no overlap with existing
-    holes on any wall it pierces.
+  - `saw` can only shorten a part (`target <= part.length`).
+  - `drill` requires a datum lying on a valid wall of the part and a hole that
+    fits inside the wall's inner cavity and tube ends.
 
 If any rule fails, the operation throws immediately and no node is constructed.
 
 ### 3. How datums are defined and evolve across operations
 
-A `Datum` is a right-handed 3D coordinate frame — a $4 \times 4$ homogeneous
-transformation $T = [\hat{x}\;\hat{y}\;\hat{z}\;p;\;0\;0\;0\;1] \in SE(3)$
-relative to the part origin — with no `width`, `height`, or magic face symbols
-stored on it:
+A `Datum` is a right-handed 3D coordinate frame — a rigid transformation
+$T \in SE(3)$ relative to the part origin, backed by
+`CoordinateTransformations.AffineMap` and `Rotations.RotMatrix3` — with no
+`width`, `height`, or face symbols stored on it:
 
 - **Each concrete `AbstractPart` implements `datums(part)`**, returning its
-  surface `Datum` frames. Generic selectors on `AbstractPart` (`datum(part, n̂)`
-  and aliases `front`, `back`, `right`, `left`, `top`, `bottom`) select a surface
-  by its outward normal $\hat{z}$, and `translate(d, x, y)` (or
-  `front(part, x, y)`) offsets the frame by $(x, y)$ on that surface.
+  surface `Datum` frames, and `datum(part, normal)` selects a surface by its
+  outward normal $\hat{z}$. Offsetting a frame by $(x, y)$ on that surface is
+  standard `CoordinateTransformations` composition:
+  `Datum(wall.transform ∘ Translation(x, y, 0.0))`.
 - **Stock bounds update on the part node:** `saw` returns a new `RectangularTube`
   with the shortened `length`, updating the valid axial range for subsequent
   operations.
-- **Material removal is tracked in the ancestor chain:** operations walk
-  `part.parent` to check prior cuts in 3D so new holes cannot collide with
-  existing holes and saw cuts cannot slice through them.
 - **Setup tracking:** two operations share a 3-axis setup when their `Datum`s
   share the same outward normal $\hat{z}$.
 
@@ -175,15 +171,15 @@ its own manufacturing history — no global mutable graph is needed.
 - **2D datum frame (ASME drawing / vise corner origin):** when looking straight
   at a surface (down $-\hat{z}$), each `Datum` has a right-handed frame
   $(\hat{x}, \hat{y}, \hat{z})$ with $\hat{x} \times \hat{y} = \hat{z}$ and
-  `origin` at its bottom-left corner:
-  - On the four vertical tube walls (`front`, `right`, `back`, `left`),
-    $\hat{y} = (0, 0, 1)$ (along the tube length) and $\hat{x} = \hat{y} \times \hat{z}$
-    points right across the wall width, so `translate(wall, x, y)` maps $(x, y)$
-    to 3D via $p + x\hat{x} + y\hat{y}$.
-- `Drill(Circle(diameter), front(part, x, y), ThroughAll())` represents a
-  cross-drilled hole entering the front wall ($Y = 0$) and exiting the back wall
-  ($Y = \text{height}$), producing aligned circular openings in both walls; with
-  `ThroughWall()`, it pierces only the front wall into the tube cavity.
+  origin at its bottom-left corner:
+  - On the four vertical tube walls, $\hat{y} = (0, 0, 1)$ (along the tube
+    length) and $\hat{x} = \hat{y} \times \hat{z}$ points right across the wall
+    width, so `wall.transform ∘ Translation(x, y, 0.0)` maps $(x, y)$ to 3D via
+    $p + x\hat{x} + y\hat{y}$.
+- `Drill(Circle(diameter), d, ThroughAll())` represents a cross-drilled hole
+  entering the datum wall and exiting the opposite wall, producing aligned
+  circular openings in both walls; with `ThroughWall()`, it pierces only the
+  entry wall into the tube cavity.
 
 ### 6. Derived geometry
 
@@ -205,8 +201,8 @@ src/
   primitives.jl       AbstractPart, AbstractTube, AbstractProfile,
                       AbstractDatum, AbstractPenetration, AbstractOperation,
                       RectangularTube, Circle, Datum, ThroughAll, ThroughWall,
-                      Blind, Saw, Drill, datums, datum, front, back, right,
-                      left, top, bottom, translate, isstock, holes, saw, drill
+                      Blind, Saw, Drill, origin, xaxis, yaxis, zaxis, datums,
+                      datum, isstock, holes, saw, drill
   graph.jl            ManufacturingGraph, graph, hole_table, to_dot
   geometry.jl         2D perforated wall profiles, triangulation, derive_mesh
   visualization.jl    visualize(part) via MeshCat, visualize(graph) via Graphviz
@@ -248,12 +244,10 @@ directly with `Triangulate.jl`.
   `AbstractDatum`, `AbstractPenetration`, `AbstractOperation`) and the initial
   leaf structs (`RectangularTube`, `Circle`, `Datum`, `ThroughAll`,
   `ThroughWall`, `Blind`, `Saw`, `Drill`).
-- Implement `datums(part)`, normal-based surface selectors (`front`, `back`,
-  `right`, `left`), `translate`, `saw`, and `drill` with their dispatch and
-  construction checks.
+- Implement `datums(part)`, `datum(part, normal)`, `saw`, and `drill` with their
+  dispatch and construction checks.
 - Test valid operation chains and verify that invalid dimensions, unsupported
-  dispatch combinations, out-of-bounds or overlapping holes, and cuts across
-  existing holes fail immediately.
+  dispatch combinations, and out-of-bounds holes fail immediately.
 
 ### Task 2: Manufacturing graph and inspection reads
 
@@ -288,8 +282,7 @@ directly with `Triangulate.jl`.
 ### Task 5: SM-2.5 upright model
 
 - In `projects/ghd/upright.jl`, define `UprightSpec` and `build_upright(spec)`
-  using `RectangularTube`, `Circle`, `Datum` (`front`), `ThroughAll`, `saw`, and
-  `drill`.
+  using `RectangularTube`, `Circle`, `Datum`, `ThroughAll`, `saw`, and `drill`.
 - Record published SM-2.5 values from `DIMENSIONS.md` (3×3″ section, 11-gauge
   ≈ 0.120″ wall, 103″ height, 1″ hole class on 2″ centers) and explicitly mark
   assumed values (raw stick length, exact drilled diameter, first-hole offset,
@@ -311,17 +304,21 @@ The plan is complete when the README example runs end to end:
 ```julia
 using Revise
 using BigArm
+using CoordinateTransformations: Translation
+using StaticArrays: SVector
 
 stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
 blank = saw(stick, 103.0)
 
-hole = Circle(1.0)
+front = datum(blank, SVector(0, -1, 0))
+hole  = Circle(1.0)
 upright = blank
 for y in 2.0:2.0:100.0
-    upright = drill(upright, hole, front(upright, 1.5, y), ThroughAll())
+    d = Datum(front.transform ∘ Translation(1.5, y, 0.0))
+    upright = drill(upright, hole, d, ThroughAll())
 end
 
-drill(upright, Circle(4.0), front(upright, 1.5, 51.0), ThroughAll())  # throws
+drill(upright, Circle(4.0), Datum(front.transform ∘ Translation(1.5, 51.0, 0.0)), ThroughAll())  # throws
 
 visualize(upright)               # renders the perforated 3×3 tube in MeshCat
 visualize(graph(upright))        # renders stock → saw → 50 drills → upright

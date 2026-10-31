@@ -165,17 +165,21 @@ One SM-2.5 upright, as mill stock and shop operations:
 
 ```julia
 using BigArm
+using CoordinateTransformations: Translation
+using StaticArrays: SVector
 
 stick = RectangularTube(3.0, 3.0, 288.0, 0.120)  # 3×3″ 11-gauge tube, 24′ mill stick
 blank = saw(stick, 103.0)                        # cut to length, inches
 
-hole = Circle(1.0)
+front = datum(blank, SVector(0, -1, 0))          # front wall datum (-Y normal)
+hole  = Circle(1.0)
 upright = blank
 for y in 2.0:2.0:100.0                           # (x, y) from bottom-left corner of front wall
-    upright = drill(upright, hole, front(upright, 1.5, y), ThroughAll())
+    d = Datum(front.transform ∘ Translation(1.5, y, 0.0))
+    upright = drill(upright, hole, d, ThroughAll())
 end
 
-drill(upright, Circle(4.0), front(upright, 1.5, 51.0), ThroughAll())  # throws: 4″ hole can't fit a 3″ face
+drill(upright, Circle(4.0), Datum(front.transform ∘ Translation(1.5, 51.0, 0.0)), ThroughAll())  # throws
 
 visualize(upright)               # the drilled tube in MeshCat
 visualize(graph(upright))        # stock → saw → 50 drills → upright
