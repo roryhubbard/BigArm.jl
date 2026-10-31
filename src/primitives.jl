@@ -15,14 +15,14 @@ abstract type AbstractTube <: AbstractPart end
 """
     AbstractProfile
 
-Supertype for pure 2D shapes cut in a datum face's plane.
+Supertype for pure 2D shapes cut in a datum's XY plane.
 """
 abstract type AbstractProfile end
 
 """
     AbstractDatum
 
-Supertype for locations on a part (face/axis and coordinates).
+Supertype for coordinate frames on a part.
 """
 abstract type AbstractDatum end
 
@@ -98,34 +98,110 @@ struct Circle <: AbstractProfile
     end
 end
 
-const VALID_FACES = (:front, :back, :left, :right)
+const _ATOL = 1e-9
 
 """
-    FaceDatum(face, x=0.0, z)
+    Datum(transform::Transformation)
 
-Location on a part face with valid `face::Symbol`
-(`:front`, `:back`, `:left`, `:right`), horizontal offset `x` from the face
-centerline, and axial position `z` from the base (`Z = 0`), in inches
-(`Float64`).
+Right-handed 3D coordinate frame (`SE(3)` rigid transformation relative to the
+part's 3D origin), constructed from a `CoordinateTransformations` object
+(`AffineMap`, `LinearMap`, or `Translation`):
+- `origin(d)` is the 3D origin `SVector{3,Float64}` in part coordinates,
+- `x_axis(d)` and `y_axis(d)` are the orthonormal 2D axes on the datum surface,
+- `z_axis(d)` is the outward surface normal (tools approach along `-z_axis(d)`).
 """
-struct FaceDatum <: AbstractDatum
-    face::Symbol
-    x::Float64
-    z::Float64
+struct Datum <: AbstractDatum
+    transform::AffineMap{RotMatrix3{Float64},SVector{3,Float64}}
 
-    function FaceDatum(face::Symbol, x::Real, z::Real)
-        face in VALID_FACES || throw(
-            ArgumentError("Invalid face :$face; must be one of :front, :back, :left, :right"),
-        )
-        xf = Float64(x)
-        zf = Float64(z)
-        isfinite(xf) || throw(DomainError(x, "FaceDatum x must be finite"))
-        isfinite(zf) || throw(DomainError(z, "FaceDatum z must be finite"))
-        return new(face, xf, zf)
+    function Datum(transform::AffineMap)
+        M = transform.linear
+        p = SVector{3,Float64}(transform.translation)
+        all(isfinite, p) || throw(DomainError(p, "Datum origin coordinates must be finite"))
+        all(isfinite, M) || throw(DomainError(M, "Datum rotation matrix entries must be finite"))
+        isrotation(M) || throw(ArgumentError("Datum linear map must be a valid right-handed SO(3) rotation"))
+        return new(AffineMap(RotMatrix3{Float64}(M), p))
     end
 end
 
-FaceDatum(face::Symbol, z::Real) = FaceDatum(face, 0.0, z)
+Datum(t::LinearMap) = Datum(Translation(0.0, 0.0, 0.0) ∘ t)
+Datum(t::Translation) = Datum(t ∘ LinearMap(one(RotMatrix3{Float64})))
+
+origin(d::Datum) = d.transform.translation
+x_axis(d::Datum) = d.transform.linear[:, 1]
+y_axis(d::Datum) = d.transform.linear[:, 2]
+z_axis(d::Datum) = d.transform.linear[:, 3]
+
+(d::Datum)(p::SVector{3,Float64}) = d.transform(p)
+(d::Datum)(x::Real, y::Real, z::Real=0.0) = d.transform(SVector{3,Float64}(x, y, z))
+
+"""
+    translate(d::Datum, x::Real, y::Real, z::Real=0.0) -> Datum
+
+Return a new `Datum` composed with a local `Translation(x, y, z)` in `d`'s frame
+(`d.transform ∘ Translation(x, y, z)`).
+"""
+function translate(d::Datum, x::Real, y::Real, z::Real=0.0)
+    v = SVector{3,Float64}(x, y, z)
+    all(isfinite, v) || throw(DomainError((x, y, z), "Datum translation coordinates must be finite"))
+    return Datum(d.transform ∘ Translation(v))
+end
+
+"""
+    local_coords(frame::Datum, point_or_datum) -> SVector{3,Float64}
+
+Return the local `(x, y, z)` coordinates of a 3D point or another `Datum`'s
+origin in `frame` (`inv(frame.transform)(p)`).
+"""
+local_coords(frame::Datum, p::SVector{3,Float64}) = inv(frame.transform)(p)
+local_coords(frame::Datum, target::Datum) = local_coords(frame, origin(target))
+
+"""
+    datums(part::RectangularTube) -> NTuple{4,Datum}
+
+Return the four outer wall `Datum` frames of a `RectangularTube` (front `-Y`,
+right `+X`, back `+Y`, left `-X`), each with `(0, 0)` at its bottom-left corner
+when looking straight at the wall (`-z_axis`) with `+Z` pointing up.
+"""
+function datums(part::RectangularTube)
+    w = part.width
+    h = part.height
+    return (
+        Datum(Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(π / 2))),                  # front (-Y)
+        Datum(Translation(w,   0.0, 0.0) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2))),    # right (+X)
+        Datum(Translation(w,   h,   0.0) ∘ LinearMap(RotZ(π) * RotX(π / 2))),        # back  (+Y)
+        Datum(Translation(0.0, h,   0.0) ∘ LinearMap(RotZ(-π / 2) * RotX(π / 2))),   # left  (-X)
+    )
+end
+
+"""
+    datum(part::AbstractPart, normal) -> Datum
+
+Select the `Datum` in `datums(part)` whose outward normal `z_axis(d)` matches
+`normal`.
+"""
+function datum(part::AbstractPart, normal::Union{AbstractVector{<:Real},Tuple{Real,Real,Real}})
+    n = SVector{3,Float64}(normal)
+    for d in datums(part)
+        if norm(z_axis(d) - n) <= _ATOL
+            return d
+        end
+    end
+    throw(ArgumentError("Part $(typeof(part)) has no datum with normal $n"))
+end
+
+front(part::AbstractPart)  = datum(part, SVector( 0.0, -1.0,  0.0))
+back(part::AbstractPart)   = datum(part, SVector( 0.0,  1.0,  0.0))
+right(part::AbstractPart)  = datum(part, SVector( 1.0,  0.0,  0.0))
+left(part::AbstractPart)   = datum(part, SVector(-1.0,  0.0,  0.0))
+top(part::AbstractPart)    = datum(part, SVector( 0.0,  0.0,  1.0))
+bottom(part::AbstractPart) = datum(part, SVector( 0.0,  0.0, -1.0))
+
+front(part::AbstractPart, x::Real, y::Real)  = translate(front(part), x, y)
+back(part::AbstractPart, x::Real, y::Real)   = translate(back(part), x, y)
+right(part::AbstractPart, x::Real, y::Real)  = translate(right(part), x, y)
+left(part::AbstractPart, x::Real, y::Real)   = translate(left(part), x, y)
+top(part::AbstractPart, x::Real, y::Real)    = translate(top(part), x, y)
+bottom(part::AbstractPart, x::Real, y::Real) = translate(bottom(part), x, y)
 
 """
     ThroughAll()
@@ -174,13 +250,13 @@ struct Saw <: AbstractOperation
 end
 
 """
-    Drill(profile::Circle, datum::FaceDatum, penetration::AbstractPenetration)
+    Drill(profile::Circle, datum::Datum, penetration::AbstractPenetration)
 
 Drilling operation cutting `profile` at `datum` with `penetration` mode.
 """
 struct Drill <: AbstractOperation
     profile::Circle
-    datum::FaceDatum
+    datum::Datum
     penetration::AbstractPenetration
 end
 
@@ -211,24 +287,45 @@ function holes(part::AbstractPart)
     return result
 end
 
-_face_width(part::RectangularTube, face::Symbol) =
-    (face === :front || face === :back) ? part.width : part.height
+function _wall_span(part::RectangularTube, wall::Datum)
+    dims = SVector(part.width, part.height, part.length)
+    wall_width = dot(abs.(x_axis(wall)), dims)
+    cross_depth = dot(abs.(z_axis(wall)), dims)
+    return (wall_width, cross_depth)
+end
 
-_opposite_face(face::Symbol) =
-    face === :front ? :back :
-    face === :back ? :front :
-    face === :left ? :right : :left
+function _match_wall(part::RectangularTube, d::Datum)
+    wall = datum(part, z_axis(d))
+    norm(d.transform.linear - wall.transform.linear) <= _ATOL ||
+        throw(ArgumentError("Datum axes must align with the target wall datum on RectangularTube"))
+    x, y, z = local_coords(wall, d)
+    abs(z) <= _ATOL ||
+        throw(ArgumentError("Datum origin $(origin(d)) does not lie on the surface of wall with normal $(z_axis(wall)) (normal offset z=$z)"))
+    return (wall, x, y)
+end
 
 """
-    pierced_faces(op::Drill) -> NTuple{2,Symbol}
+    pierced_walls(part::RectangularTube, d::Datum, penetration::AbstractPenetration)
+    pierced_walls(part::RectangularTube, op::Drill)
 
-Faces pierced by drilling operation `op`: only `op.datum.face` for `ThroughWall`
-(with a `nothing` second entry), or both `op.datum.face` and its opposite wall
-for `ThroughAll`.
+Return the tuple of `(wall::Datum, center_3d::SVector{3,Float64})` pairs for
+each wall of `part` pierced by a drilling operation.
 """
-pierced_faces(op::Drill) =
-    op.penetration isa ThroughWall ? (op.datum.face, nothing) :
-    (op.datum.face, _opposite_face(op.datum.face))
+function pierced_walls(part::RectangularTube, d::Datum, ::ThroughWall)
+    wall, _, _ = _match_wall(part, d)
+    return ((wall, origin(d)),)
+end
+
+function pierced_walls(part::RectangularTube, d::Datum, ::ThroughAll)
+    wall, _, _ = _match_wall(part, d)
+    _, cross_depth = _wall_span(part, wall)
+    opp_wall = datum(part, -z_axis(wall))
+    exit_center = d(0.0, 0.0, -cross_depth)
+    return ((wall, origin(d)), (opp_wall, exit_center))
+end
+
+pierced_walls(part::RectangularTube, op::Drill) =
+    pierced_walls(part, op.datum, op.penetration)
 
 """
     saw(part::AbstractTube, length::Real)
@@ -244,10 +341,11 @@ function saw(part::AbstractTube, op::Saw)
     )
     for drill_op in holes(part)
         r = drill_op.profile.diameter / 2.0
-        if target <= drill_op.datum.z + r
+        hole_z = origin(drill_op.datum)[3]
+        if target <= hole_z + r
             throw(
                 ArgumentError(
-                    "Cannot saw at length $target across or below existing hole at z=$(drill_op.datum.z) (diameter=$(drill_op.profile.diameter))",
+                    "Cannot saw at length $target across or below existing hole at Z=$hole_z (diameter=$(drill_op.profile.diameter))",
                 ),
             )
         end
@@ -261,61 +359,57 @@ saw(part::AbstractTube, length::Real) = saw(part, Saw(length))
     drill(
         part::RectangularTube,
         profile::Circle,
-        datum::FaceDatum,
+        d::Datum,
         penetration::Union{ThroughAll,ThroughWall}=ThroughAll(),
     )
 
-Drill circular `profile` into `part` at `datum`. Validates that the circle fits
-strictly within the inner cavity width of that face
-(`abs(datum.x) + diameter / 2 < face_width / 2 - wall`), lies wholly within the
-tube ends (`diameter / 2 < datum.z < length - diameter / 2`), and does not
-overlap any existing hole on any wall it pierces.
+Drill circular `profile` into `part` at datum `d`. Validates that `d` lies on a
+valid wall of `part`, the circle fits strictly within the inner cavity width of
+that wall (`wall + diameter / 2 < x < wall_width - wall - diameter / 2`), lies
+wholly within the tube ends (`diameter / 2 < y < length - diameter / 2`), and
+does not overlap any existing hole on any wall it pierces.
 """
 function drill(
     part::RectangularTube,
     profile::Circle,
-    datum::FaceDatum,
+    d::Datum,
     penetration::Union{ThroughAll,ThroughWall},
 )
+    wall, x, y = _match_wall(part, d)
+    wall_width, _ = _wall_span(part, wall)
     r = profile.diameter / 2.0
-    face_width = _face_width(part, datum.face)
-    inner_width = face_width - 2.0 * part.wall
-    abs(datum.x) + r < inner_width / 2.0 || throw(
+    (part.wall + r < x && x < wall_width - part.wall - r) || throw(
         ArgumentError(
-            "Circle (diameter=$(profile.diameter)) at x=$(datum.x) on face :$(datum.face) must fit strictly within inner cavity width ($inner_width)",
+            "Circle (diameter=$(profile.diameter)) at local x=$x must fit strictly within inner cavity x ∈ ($(part.wall), $(wall_width - part.wall))",
         ),
     )
-    (r < datum.z && datum.z < part.length - r) || throw(
+    (r < y && y < part.length - r) || throw(
         ArgumentError(
-            "Hole (diameter=$(profile.diameter), z=$(datum.z)) must lie wholly within tube ends (0.0, $(part.length))",
+            "Hole (diameter=$(profile.diameter), y=$y) must lie wholly within tube ends (0.0, $(part.length))",
         ),
     )
 
-    op = Drill(profile, datum, penetration)
-    new_faces = pierced_faces(op)
+    op = Drill(profile, d, penetration)
+    new_pierced = pierced_walls(part, op)
     for existing in holes(part)
-        existing_faces = pierced_faces(existing)
-        same_face = datum.face == existing.datum.face
-        if same_face || new_faces[2] in existing_faces || existing_faces[2] in new_faces
-            min_center_dist = r + existing.profile.diameter / 2.0
-            intersects = if same_face
-                # Circles on the same planar wall must not intersect in 2D.
-                hypot(datum.x - existing.datum.x, datum.z - existing.datum.z) <= min_center_dist
-            else
-                # ThroughWall on one wall and ThroughWall on the opposite wall
-                # pierce different wall material (into the same open cavity).
-                penetration isa ThroughWall && existing.penetration isa ThroughWall ?
-                false : abs(datum.z - existing.datum.z) <= min_center_dist
+        existing_pierced = pierced_walls(part, existing)
+        for (w1, c1) in new_pierced
+            for (w2, c2) in existing_pierced
+                if norm(z_axis(w1) - z_axis(w2)) <= _ATOL
+                    min_center_dist = r + existing.profile.diameter / 2.0
+                    if norm(c1 - c2) <= min_center_dist
+                        throw(
+                            ArgumentError(
+                                "Hole at 3D center $c1 overlaps existing hole at $c2 on wall with normal $(z_axis(w1))",
+                            ),
+                        )
+                    end
+                end
             end
-            intersects && throw(
-                ArgumentError(
-                    "Hole at (face=:$(datum.face), x=$(datum.x), z=$(datum.z)) overlaps existing hole at (face=:$(existing.datum.face), x=$(existing.datum.x), z=$(existing.datum.z))",
-                ),
-            )
         end
     end
     return RectangularTube(part.width, part.height, part.length, part.wall, part, op)
 end
 
-drill(part::RectangularTube, profile::Circle, datum::FaceDatum) =
-    drill(part, profile, datum, ThroughAll())
+drill(part::RectangularTube, profile::Circle, d::Datum) =
+    drill(part, profile, d, ThroughAll())

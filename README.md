@@ -123,6 +123,7 @@ dependency only when the corresponding functionality is implemented.
 | Concern            | Working choice                                  |
 | ------------------ | ----------------------------------------------- |
 | Language           | Julia 1.13+                                     |
+| Coordinate frames  | CoordinateTransformations.jl + Rotations.jl + StaticArrays.jl |
 | Parameters         | TOML (stdlib)                                   |
 | 2D polygon ops     | LibGEOS.jl — union, difference, offset          |
 | Triangulation      | Triangulate.jl — profiles with holes → meshes   |
@@ -170,11 +171,11 @@ blank = saw(stick, 103.0)                        # cut to length, inches
 
 hole = Circle(1.0)
 upright = blank
-for z in 2.0:2.0:100.0                           # 2″ centers; first-hole offset assumed
-    upright = drill(upright, hole, FaceDatum(:front, 0.0, z), ThroughAll())
+for y in 2.0:2.0:100.0                           # (x, y) from bottom-left corner of front wall
+    upright = drill(upright, hole, front(upright, 1.5, y), ThroughAll())
 end
 
-drill(upright, Circle(4.0), FaceDatum(:front, 0.0, 51.0), ThroughAll())  # throws: 4″ hole can't fit a 3″ face
+drill(upright, Circle(4.0), front(upright, 1.5, 51.0), ThroughAll())  # throws: 4″ hole can't fit a 3″ face
 
 visualize(upright)               # the drilled tube in MeshCat
 visualize(graph(upright))        # stock → saw → 50 drills → upright
