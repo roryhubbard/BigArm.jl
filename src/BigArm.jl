@@ -1,5 +1,7 @@
 module BigArm
 
+import Base: parent
+
 using CoordinateTransformations: AffineMap, LinearMap, Translation
 using LinearAlgebra: dot, norm, normalize
 using Rotations: Rotation, RotX, RotZ
@@ -19,6 +21,10 @@ export AbstractPart,
     Blind,
     Saw,
     Drill,
+    ManufacturingEdge,
+    ManufacturingGraph,
+    HoleTableRow,
+    operation,
     isstock,
     origin,
     xaxis,
@@ -28,8 +34,13 @@ export AbstractPart,
     datum,
     holes,
     saw,
-    drill
+    drill,
+    graph,
+    operations,
+    hole_table,
+    to_dot
 
 include("primitives.jl")
+include("graph.jl")
 
 end
