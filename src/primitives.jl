@@ -2,6 +2,10 @@
     AbstractPart
 
 Supertype for the workpiece in the machine (nodes in a manufacturing graph).
+
+Concrete parts must implement `parent(part)` and `operation(part)`. Both are
+`nothing` for raw stock, and both are present when a shop operation produced
+the part. `parent` extends `Base.parent`; `operation` has no fallback.
 """
 abstract type AbstractPart end
 
@@ -210,11 +214,32 @@ struct Drill <: AbstractOperation
 end
 
 """
+    parent(part) -> Union{Nothing,AbstractPart}
+
+Return the part `part` was made from, or `nothing` for raw stock.
+
+Each concrete `AbstractPart` implements this method of `Base.parent`. It is
+the single input of operations such as `saw` and `drill`.
+"""
+parent(part::RectangularTube) = part.parent
+
+"""
+    operation(part) -> Union{Nothing,AbstractOperation}
+
+Return the shop operation that produced `part` from `parent(part)`, or
+`nothing` for raw stock.
+
+Each concrete `AbstractPart` implements this. `parent(part)` and
+`operation(part)` are either both `nothing` or both present.
+"""
+operation(part::RectangularTube) = part.op
+
+"""
     isstock(part::AbstractPart) -> Bool
 
-Return `true` if `part` is raw mill stock (a root node with `parent === nothing`).
+Return `true` if `part` is raw mill stock (`parent(part) === nothing`).
 """
-isstock(p::AbstractPart) = isnothing(p.parent)
+isstock(part::AbstractPart) = isnothing(parent(part))
 
 """
     holes(part::AbstractPart) -> Vector{Drill}
@@ -226,11 +251,11 @@ function holes(part::AbstractPart)
     result = Drill[]
     curr = part
     while !isnothing(curr)
-        op = curr.op
-        if op isa Drill
-            push!(result, op)
+        produced_by = operation(curr)
+        if produced_by isa Drill
+            push!(result, produced_by)
         end
-        curr = curr.parent
+        curr = parent(curr)
     end
     reverse!(result)
     return result

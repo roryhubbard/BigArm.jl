@@ -17,6 +17,8 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test stick.thickness === 0.120
         @test stick.parent === nothing
         @test stick.op === nothing
+        @test parent(stick) === nothing
+        @test operation(stick) === nothing
         @test isstock(stick)
         @test length(datums(stick)) == 4
         @test isempty(holes(stick))
@@ -87,6 +89,12 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
 
         @test length(holes(upright)) == 50
         @test isstock(stick)
+        @test !isstock(blank)
+        @test parent(blank) === stick
+        @test operation(blank) isa Saw
+        @test operation(blank) === blank.op
+        @test parent(upright) isa RectangularTube
+        @test operation(upright) isa Drill
         @test isempty(holes(blank))
 
         # Sawing a drilled tube is allowed
@@ -125,6 +133,11 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         blank = saw(RectangularTube(3.0, 3.0, 288.0, 0.120), 103.0)
         d = at(datum(blank, SVector(0, -1, 0)), 1.5, 2.0)
 
+        @test_throws MethodError parent(UnsupportedPart())
+        @test_throws MethodError operation(UnsupportedPart())
+        @test_throws MethodError isstock(UnsupportedPart())
+        @test_throws MethodError holes(UnsupportedPart())
+        @test_throws MethodError graph(UnsupportedPart())
         @test_throws MethodError saw(UnsupportedPart(), 10.0)
         @test_throws MethodError drill(UnsupportedPart(), Circle(1.0), d, ThroughAll())
         @test_throws MethodError drill(UnsupportedTube(), Circle(1.0), d, ThroughAll())
