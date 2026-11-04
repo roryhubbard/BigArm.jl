@@ -251,13 +251,11 @@ directly with `Triangulate.jl`.
 
 ### Task 2: Manufacturing graph and inspection reads
 
-- Implement `ManufacturingGraph` and `graph(parts...)` by walking parent links
-  and deduplicating shared ancestor nodes.
 - Implement `operations(part)` and `hole_table(part)` as reads of the graph.
+  - TODO: is hole_table necessary right now? what is it used for?
 - Implement `to_dot(g::ManufacturingGraph)` to serialize nodes (stock/part
   summaries) and edges (operation labels) in Graphviz DOT format.
-- Write unit tests in `test/graph.jl` verifying node counts, edge ordering,
-  shared-ancestor forks, hole-table readbacks, and DOT string generation.
+  - TODO: consider using the GraphViz.jl package
 
 ### Task 3: Derived 2D/3D geometry
 
