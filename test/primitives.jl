@@ -137,7 +137,7 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError operation(UnsupportedPart())
         @test_throws MethodError isstock(UnsupportedPart())
         @test_throws MethodError holes(UnsupportedPart())
-        @test_throws MethodError graph(UnsupportedPart())
+        @test_throws MethodError ManufacturingGraph(UnsupportedPart())
         @test_throws MethodError saw(UnsupportedPart(), 10.0)
         @test_throws MethodError drill(UnsupportedPart(), Circle(1.0), d, ThroughAll())
         @test_throws MethodError drill(UnsupportedTube(), Circle(1.0), d, ThroughAll())

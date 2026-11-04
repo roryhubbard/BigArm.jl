@@ -1,117 +1,34 @@
 """
-    ManufacturingEdge(parent, op, child)
+    ManufacturingGraph(part::AbstractPart)
 
-Directed edge `parent ──op──► child` in a manufacturing graph. `op` is the shop
-operation that produced `child` from `parent`.
-"""
-struct ManufacturingEdge
-    parent::AbstractPart
-    op::AbstractOperation
-    child::AbstractPart
-end
+Manufacturing history of `part`, from raw stock to `part`.
 
-"""
-    ManufacturingGraph(nodes, edges)
-
-Unique part nodes and the directed operation edges that connect them, both in
-topological order (every parent appears before its children).
-
-Every node is a valid `AbstractPart`. Stock nodes have no incoming edge; every
-other node has exactly one, matching its `parent` and `op`.
+The history is a chain. Nodes are in that order, stock first. An edge is not
+stored: it is `parent(node) ──operation(node)──► node`.
 """
 struct ManufacturingGraph
     nodes::Vector{AbstractPart}
-    edges::Vector{ManufacturingEdge}
 
-    function ManufacturingGraph(
-        nodes::AbstractVector{<:AbstractPart},
-        edges::AbstractVector{<:ManufacturingEdge},
-    )
-        nodevec = AbstractPart[node for node in nodes]
-        edgevec = ManufacturingEdge[edge for edge in edges]
-
-        index = IdDict{AbstractPart,Int}()
-        for (i, node) in enumerate(nodevec)
-            haskey(index, node) && throw(ArgumentError("ManufacturingGraph nodes must be unique"))
-            index[node] = i
+    function ManufacturingGraph(part::AbstractPart)
+        nodes = AbstractPart[]
+        curr = part
+        while !isnothing(curr)
+            push!(nodes, curr)
+            curr = parent(curr)
         end
-
-        incoming = IdDict{AbstractPart,Nothing}()
-        for edge in edgevec
-            haskey(index, edge.parent) || throw(ArgumentError("ManufacturingEdge parent is not in the graph"))
-            haskey(index, edge.child) || throw(ArgumentError("ManufacturingEdge child is not in the graph"))
-            index[edge.parent] < index[edge.child] || throw(
-                ArgumentError("ManufacturingGraph edges must be in topological order (parent before child)"),
-            )
-            parent(edge.child) === edge.parent || throw(
-                ArgumentError("ManufacturingEdge parent does not match parent(child)"),
-            )
-            operation(edge.child) === edge.op || throw(
-                ArgumentError("ManufacturingEdge op does not match operation(child)"),
-            )
-            haskey(incoming, edge.child) && throw(
-                ArgumentError("ManufacturingGraph node has more than one incoming edge"),
-            )
-            incoming[edge.child] = nothing
-        end
-
-        for node in nodevec
-            if isstock(node)
-                haskey(incoming, node) && throw(ArgumentError("stock node has an incoming edge"))
-            else
-                haskey(incoming, node) || throw(ArgumentError("non-stock node is missing the edge from its parent"))
-            end
-        end
-
-        return new(nodevec, edgevec)
+        reverse!(nodes)
+        return new(nodes)
     end
-end
-
-"""
-    graph(parts::AbstractPart...) -> ManufacturingGraph
-
-Collect the manufacturing history of one or more parts.
-
-Walks parent links to raw stock, deduplicates shared ancestors, and returns
-the unique nodes and directed edges `parent ──op──► child` in topological
-order. Parts are visited in argument order. Each part is emitted after its
-unseen ancestors, so sibling order follows the order of `parts`.
-"""
-function graph(parts::AbstractPart...)
-    nodes = AbstractPart[]
-    edges = ManufacturingEdge[]
-    seen = IdDict{AbstractPart,Nothing}()
-
-    function visit(part::AbstractPart)
-        haskey(seen, part) && return
-        seen[part] = nothing
-        upstream = parent(part)
-        if !isnothing(upstream)
-            visit(upstream)
-        end
-        push!(nodes, part)
-        if !isnothing(upstream)
-            produced_by = operation(part)
-            produced_by isa AbstractOperation || throw(ArgumentError("non-stock $(typeof(part)) is missing an operation"))
-            push!(edges, ManufacturingEdge(upstream, produced_by, part))
-        end
-        return nothing
-    end
-
-    for part in parts
-        visit(part)
-    end
-    return ManufacturingGraph(nodes, edges)
 end
 
 """
     operations(part::AbstractPart) -> Vector{AbstractOperation}
 
 Return the shop operations that produced `part`, from raw stock to `part`,
-read from `graph(part)`.
+read from `ManufacturingGraph(part)`.
 """
 function operations(part::AbstractPart)
-    return AbstractOperation[edge.op for edge in graph(part).edges]
+    return AbstractOperation[operation(node) for node in ManufacturingGraph(part).nodes if !isstock(node)]
 end
 
 """
@@ -120,16 +37,17 @@ end
 One drilled hole, read back from a part's manufacturing graph.
 
 `index` is chronological, starting at 1. `local_x` and `local_y` are the hole
-center in the entry-face datum (bottom-left origin, inches). `position` and
-`normal` are the center and outward normal in the part frame.
+center in the entry-face datum (bottom-left origin, inches).
+`position_in_part_frame` and `normal_in_part_frame` are the center and outward
+normal in the part frame.
 """
 struct HoleTableRow
     index::Int
     diameter::Float64
     local_x::Float64
     local_y::Float64
-    position::SVector{3,Float64}
-    normal::SVector{3,Float64}
+    position_in_part_frame::SVector{3,Float64}
+    normal_in_part_frame::SVector{3,Float64}
     penetration::AbstractPenetration
 end
 
@@ -158,11 +76,11 @@ not a filter of the current solid.
 function hole_table(part::AbstractPart)
     rows = HoleTableRow[]
     index = 0
-    for edge in graph(part).edges
-        op = edge.op
+    for node in ManufacturingGraph(part).nodes
+        op = operation(node)
         op isa Drill || continue
         index += 1
-        push!(rows, _hole_row(edge.child, op, index))
+        push!(rows, _hole_row(node, op, index))
     end
     return rows
 end
@@ -207,9 +125,9 @@ _op_label(op::AbstractOperation) = string(nameof(typeof(op)))
 """
     to_dot(g::ManufacturingGraph) -> String
 
-Serialize `g` as a Graphviz DOT digraph. Nodes are stock/part summaries and
-edges are labeled with the operation that produced the child. Node ids `n0`,
-`n1`, ... follow `g.nodes` order.
+Serialize `g` as a Graphviz DOT digraph. Nodes are stock/part summaries. Each
+non-stock node emits an edge `parent(node) → node`, labeled with
+`operation(node)`. Node ids `n0`, `n1`, ... follow `g.nodes` order.
 """
 function to_dot(g::ManufacturingGraph)
     lines = String["digraph ManufacturingGraph {", "  rankdir=TB;", "  node [shape=box];"]
@@ -220,23 +138,17 @@ function to_dot(g::ManufacturingGraph)
         label = _dot_escape(_part_summary(node))
         push!(lines, "  n$id [label=\"$label\"];")
     end
-    for edge in g.edges
-        label = _dot_escape(_op_label(edge.op))
-        push!(lines, "  n$(index[edge.parent]) -> n$(index[edge.child]) [label=\"$label\"];")
+    for node in g.nodes
+        isstock(node) && continue
+        label = _dot_escape(_op_label(operation(node)))
+        push!(lines, "  n$(index[parent(node)]) -> n$(index[node]) [label=\"$label\"];")
     end
     push!(lines, "}")
     return join(lines, '\n') * '\n'
 end
 
-function Base.show(io::IO, edge::ManufacturingEdge)
-    print(io, "ManufacturingEdge(")
-    print(io, nameof(typeof(edge.parent)), " ──", _op_label(edge.op), "──► ")
-    print(io, nameof(typeof(edge.child)), ")")
-    return nothing
-end
-
 function Base.show(io::IO, g::ManufacturingGraph)
-    print(io, "ManufacturingGraph(", length(g.nodes), " nodes, ", length(g.edges), " edges)")
+    print(io, "ManufacturingGraph(", length(g.nodes), " nodes)")
     return nothing
 end
 
