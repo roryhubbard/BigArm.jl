@@ -1,0 +1,193 @@
+using CoordinateTransformations: LinearMap, Translation
+using GeometryBasics: GeometryBasics, Mesh, coordinates, faces
+using LinearAlgebra: cross, dot, norm
+using Rotations: RotX
+using StaticArrays: SVector
+
+function mesh_bbox(mesh::Mesh)
+    pts = coordinates(mesh)
+    xs = [p[1] for p in pts]
+    ys = [p[2] for p in pts]
+    zs = [p[3] for p in pts]
+    return (
+        SVector(minimum(xs), minimum(ys), minimum(zs)),
+        SVector(maximum(xs), maximum(ys), maximum(zs)),
+    )
+end
+
+function check_manifold_and_volume(mesh::Mesh)
+    pts = coordinates(mesh)
+    fcs = faces(mesh)
+    nverts = length(pts)
+    nfaces = length(fcs)
+    half_edges = Dict{Tuple{Int,Int},Int}()
+    vol6 = 0.0
+    valid_indices = true
+    nondegenerate = true
+
+    for f in fcs
+        i1, i2, i3 = Int(f[1]), Int(f[2]), Int(f[3])
+        if !(1 <= i1 <= nverts && 1 <= i2 <= nverts && 1 <= i3 <= nverts && i1 != i2 && i2 != i3 && i3 != i1)
+            valid_indices = false
+            break
+        end
+
+        p1 = SVector(pts[i1][1], pts[i1][2], pts[i1][3])
+        p2 = SVector(pts[i2][1], pts[i2][2], pts[i2][3])
+        p3 = SVector(pts[i3][1], pts[i3][2], pts[i3][3])
+        norm(cross(p2 - p1, p3 - p1)) > 1e-12 || (nondegenerate = false)
+
+        for (u, v) in ((i1, i2), (i2, i3), (i3, i1))
+            half_edges[(u, v)] = get(half_edges, (u, v), 0) + 1
+        end
+        vol6 += dot(p1, cross(p2, p3))
+    end
+
+    @test valid_indices
+    @test nondegenerate
+
+    # Watertight orientable 2-manifold: every directed half-edge appears once,
+    # and its reverse half-edge appears once.
+    @test all(==(1), values(half_edges))
+    @test all(((u, v),) -> get(half_edges, (v, u), 0) == 1, keys(half_edges))
+
+    nedges = length(half_edges) ÷ 2
+    euler = nverts - nedges + nfaces
+    return (; nverts, nfaces, nedges, euler, volume=vol6 / 6.0)
+end
+
+@testset "Derived 2D/3D geometry" begin
+    stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
+    blank = saw(stick, 103.0)
+    front = datum(blank, SVector(0, -1, 0))
+    right = datum(blank, SVector(1, 0, 0))
+
+    one_wall = drill(
+        blank,
+        Circle(1.0),
+        Datum(front.transform ∘ Translation(1.5, 10.0, 0.0)),
+        ThroughWall(),
+    )
+    one_hole = drill(
+        blank,
+        Circle(1.0),
+        Datum(front.transform ∘ Translation(1.0, 10.0, 0.0)),
+        ThroughAll(),
+    )
+    multi_hole = drill(
+        drill(
+            one_hole,
+            Circle(1.0),
+            Datum(front.transform ∘ Translation(1.5, 20.0, 0.0)),
+            ThroughAll(),
+        ),
+        Circle(0.5),
+        Datum(right.transform ∘ Translation(1.5, 30.0, 0.0)),
+        ThroughAll(),
+    )
+
+    @testset "Raw stick and sawn blank meshes" begin
+        stick_mesh = derive_mesh(stick)
+        @test stick_mesh isa Mesh
+        lo, hi = mesh_bbox(stick_mesh)
+        @test lo ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi ≈ SVector(3.0, 3.0, 288.0) atol = 1e-12
+
+        stick_stats = check_manifold_and_volume(stick_mesh)
+        @test stick_stats.nverts == 16
+        @test stick_stats.nfaces == 32
+        @test stick_stats.euler == 0
+        expected_area = 3.0 * 3.0 - (3.0 - 2 * 0.120)^2
+        @test stick_stats.volume ≈ expected_area * 288.0 atol = 1e-9
+
+        blank_mesh = derive_mesh(blank)
+        @test blank_mesh isa Mesh
+        lo_b, hi_b = mesh_bbox(blank_mesh)
+        @test lo_b ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_b ≈ SVector(3.0, 3.0, 103.0) atol = 1e-12
+
+        blank_stats = check_manifold_and_volume(blank_mesh)
+        @test blank_stats.nverts == 16
+        @test blank_stats.nfaces == 32
+        @test blank_stats.euler == 0
+        @test blank_stats.volume ≈ expected_area * 103.0 atol = 1e-9
+    end
+
+    @testset "Intermediate 1-hole and multi-hole part meshes" begin
+        blank_stats = check_manifold_and_volume(derive_mesh(blank))
+
+        wall_mesh = derive_mesh(one_wall)
+        lo_w, hi_w = mesh_bbox(wall_mesh)
+        @test lo_w ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_w ≈ SVector(3.0, 3.0, 103.0) atol = 1e-12
+        wall_stats = check_manifold_and_volume(wall_mesh)
+        @test wall_stats.euler == -2
+        @test wall_stats.volume < blank_stats.volume
+
+        # ThroughWall pierces front wall (Y = 0 and Y = t), not back wall (Y = 3.0)
+        wall_pts = coordinates(wall_mesh)
+        @test count(p -> isapprox(p[2], 0.0; atol=1e-9) && isapprox(hypot(p[1] - 1.5, p[3] - 10.0), 0.5; atol=1e-9), wall_pts) == BigArm._CIRCLE_SEGMENTS
+        @test count(p -> isapprox(p[2], 0.120; atol=1e-9) && isapprox(hypot(p[1] - 1.5, p[3] - 10.0), 0.5; atol=1e-9), wall_pts) == BigArm._CIRCLE_SEGMENTS
+        @test count(p -> isapprox(p[2], 3.0; atol=1e-9) && isapprox(hypot(p[1] - 1.5, p[3] - 10.0), 0.5; atol=1e-9), wall_pts) == 0
+
+        one_mesh = derive_mesh(one_hole)
+        lo_1, hi_1 = mesh_bbox(one_mesh)
+        @test lo_1 ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_1 ≈ SVector(3.0, 3.0, 103.0) atol = 1e-12
+        one_stats = check_manifold_and_volume(one_mesh)
+        @test one_stats.euler == -4
+        @test (blank_stats.volume - one_stats.volume) ≈ 2.0 * (blank_stats.volume - wall_stats.volume) atol = 1e-9
+        @test isapprox(blank_stats.volume - one_stats.volume, 2.0 * π * 0.5^2 * 0.120; rtol=0.01)
+
+        # Off-center ThroughAll hole at X = 1.0, Z = 10.0 aligns on front and back walls in 3D
+        one_pts = coordinates(one_mesh)
+        for y_plane in (0.0, 0.120, 3.0 - 0.120, 3.0)
+            @test count(
+                p -> isapprox(p[2], y_plane; atol=1e-9) && isapprox(hypot(p[1] - 1.0, p[3] - 10.0), 0.5; atol=1e-9),
+                one_pts,
+            ) == BigArm._CIRCLE_SEGMENTS
+        end
+
+        multi_mesh = derive_mesh(multi_hole)
+        lo_m, hi_m = mesh_bbox(multi_mesh)
+        @test lo_m ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_m ≈ SVector(3.0, 3.0, 103.0) atol = 1e-12
+        multi_stats = check_manifold_and_volume(multi_mesh)
+        @test multi_stats.euler == -12
+        @test multi_stats.volume < one_stats.volume
+
+        # Every node in the manufacturing graph meshes cleanly
+        g = ManufacturingGraph(multi_hole)
+        for node in g.nodes
+            m = derive_mesh(node)
+            @test m isa Mesh
+            check_manifold_and_volume(m)
+        end
+    end
+
+    @testset "2.5D slab generality and dispatch" begin
+        b = BigArm._MeshBuilder()
+        plate_datum = Datum(Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0)))
+        outer = BigArm._rect_loop(0.0, 0.0, 6.0, 4.0)
+        hole_loop = [p + SVector(3.0, 2.0) for p in BigArm._contour(Circle(1.0))]
+        BigArm._add_slab!(
+            b,
+            plate_datum,
+            outer,
+            outer,
+            [(hole_loop, SVector(3.0, 2.0))],
+            0.25;
+            close_perimeter=true,
+        )
+        plate_mesh = Mesh(b.points, b.faces)
+        lo, hi = mesh_bbox(plate_mesh)
+        @test lo ≈ SVector(0.0, 0.0, -0.25) atol = 1e-12
+        @test hi ≈ SVector(6.0, 4.0, 0.0) atol = 1e-12
+        plate_stats = check_manifold_and_volume(plate_mesh)
+        @test plate_stats.euler == 0
+        @test isapprox(plate_stats.volume, (6.0 * 4.0 - π * 0.5^2) * 0.25; rtol=0.01)
+
+        struct UnmeshedPart <: AbstractPart end
+        @test_throws MethodError derive_mesh(UnmeshedPart())
+    end
+end

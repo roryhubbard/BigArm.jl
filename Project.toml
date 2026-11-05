@@ -5,15 +5,19 @@ authors = ["rory hubbard <calvin3h@gmail.com> and contributors"]
 
 [deps]
 CoordinateTransformations = "150eb455-5306-5404-9cee-2592286d6298"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Triangulate = "f7e6ffb2-c36d-4f8f-a77e-16e897189344"
 
 [compat]
 CoordinateTransformations = "0.6.4"
+GeometryBasics = "0.5.13"
 LinearAlgebra = "1.13.0"
 Rotations = "1.7.1"
 StaticArrays = "1.9.24"
+Triangulate = "3.0.2"
 julia = "1.13"
 
 [extras]
