@@ -259,11 +259,10 @@ directly with `Triangulate.jl`.
 
 ### Task 3: Derived 2D/3D geometry
 
-- Implement 2D boundary and hole-loop construction for the four outer and four
-  inner faces of a `RectangularTube` part node.
-- Triangulate the perforated front and back faces with `Triangulate.jl`, mesh
-  the unperforated side walls and top/bottom end caps, and stitch the cylindrical
-  through-hole barrels connecting each outer wall to its inner wall.
+- implement `derive_mesh` so that we can render the parts (Task 4).
+  The solution should be general enough to work with other 2.5D parts that outer
+  library will support.
+- Leverage `Triangulate.jl` if it simplifies the code.
 - Verify in `test/geometry.jl` that `derive_mesh` succeeds on the raw `stick`,
   the sawn `blank`, an intermediate 1-hole part, and a multi-hole part, with
   expected bounding boxes and watertight/valid triangle indices.
