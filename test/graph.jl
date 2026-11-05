@@ -76,7 +76,7 @@ end
         @test !any(node -> node === parts.b || node === parts.c, from_a.nodes)
     end
 
-    @testset "Operations and hole-table readbacks" begin
+    @testset "Operation readbacks" begin
         parts = chain_parts()
         ops = operations(parts.second)
 
@@ -90,33 +90,14 @@ end
         @test length(operations(parts.blank)) == 1
         @test operations(parts.blank)[1] isa Saw
 
-        table = hole_table(parts.second)
-        @test length(table) == 2
-        @test [row.index for row in table] == [1, 2]
-        @test table[1] isa HoleTableRow
-        @test table[1].diameter === 1.0
-        @test table[1].local_x ≈ 1.5 atol = 1e-9
-        @test table[1].local_y ≈ 10.0 atol = 1e-9
-        @test table[1].position_in_part_frame ≈ SVector(1.5, 0.0, 10.0) atol = 1e-9
-        @test table[1].normal_in_part_frame ≈ SVector(0.0, -1.0, 0.0) atol = 1e-9
-        @test table[1].penetration isa ThroughAll
-        @test table[2].diameter === 0.75
-        @test table[2].local_x ≈ 1.5 atol = 1e-9
-        @test table[2].local_y ≈ 20.0 atol = 1e-9
-        @test table[2].position_in_part_frame ≈ SVector(1.5, 0.0, 20.0) atol = 1e-9
-        @test table[2].penetration isa ThroughWall
-
-        drills = filter(op -> op isa Drill, ops)
-        @test length(table) == length(drills)
-        for (row, op) in zip(table, drills)
-            @test row.diameter === op.profile.diameter
-            @test row.penetration === op.penetration
-            @test row.position_in_part_frame ≈ origin(op.datum) atol = 1e-12
-            @test row.normal_in_part_frame ≈ zaxis(op.datum) atol = 1e-12
-        end
-
-        @test isempty(hole_table(parts.stick))
-        @test isempty(hole_table(parts.blank))
+        @test ops[2] isa Drill
+        @test ops[2].profile.diameter === 1.0
+        @test ops[2].penetration isa ThroughAll
+        @test origin(ops[2].datum) ≈ SVector(1.5, 0.0, 10.0) atol = 1e-9
+        @test ops[3] isa Drill
+        @test ops[3].profile.diameter === 0.75
+        @test ops[3].penetration isa ThroughWall
+        @test origin(ops[3].datum) ≈ SVector(1.5, 0.0, 20.0) atol = 1e-9
 
         shortened = saw(parts.second, 40.0)
         shortened_ops = operations(shortened)
@@ -127,37 +108,16 @@ end
         @test shortened_ops[3] isa Drill
         @test shortened_ops[4] isa Saw
         @test shortened_ops[4].length === 40.0
-        shortened_table = hole_table(shortened)
-        @test length(shortened_table) == 2
-        @test shortened_table[1].local_y ≈ table[1].local_y atol = 1e-9
-        @test shortened_table[2].diameter === table[2].diameter
-        @test shortened_table[2].penetration isa ThroughWall
-
-        back = datum(parts.blank, SVector(0, 1, 0))
-        backed = drill(parts.blank, Circle(0.5), place(back, 0.8, 12.0), ThroughWall())
-        back_row = only(hole_table(backed))
-        @test back_row.index == 1
-        @test back_row.diameter === 0.5
-        @test back_row.local_x ≈ 0.8 atol = 1e-9
-        @test back_row.local_y ≈ 12.0 atol = 1e-9
-        @test back_row.position_in_part_frame ≈ SVector(2.2, 3.0, 12.0) atol = 1e-9
-        @test back_row.normal_in_part_frame ≈ SVector(0.0, 1.0, 0.0) atol = 1e-9
-        @test back_row.penetration isa ThroughWall
 
         forked = fork_parts()
-        @test length(hole_table(forked.a)) == 1
-        @test length(hole_table(forked.b)) == 1
-        @test hole_table(forked.a)[1].diameter === 1.0
-        @test hole_table(forked.b)[1].diameter === 0.5
-        @test hole_table(forked.b)[1].penetration isa ThroughWall
         @test length(operations(forked.a)) == 2
+        @test operations(forked.a)[end].profile.diameter === 1.0
+        @test length(operations(forked.b)) == 2
+        @test operations(forked.b)[end].profile.diameter === 0.5
+        @test operations(forked.b)[end].penetration isa ThroughWall
         @test length(operations(forked.c)) == 3
         @test operations(forked.c)[end].penetration isa ThroughAll
-        right_row = hole_table(forked.c)[2]
-        @test right_row.local_x ≈ 1.5 atol = 1e-9
-        @test right_row.local_y ≈ 40.0 atol = 1e-9
-        @test right_row.position_in_part_frame ≈ SVector(3.0, 1.5, 40.0) atol = 1e-9
-        @test right_row.normal_in_part_frame ≈ SVector(1.0, 0.0, 0.0) atol = 1e-9
+        @test origin(operations(forked.c)[end].datum) ≈ SVector(3.0, 1.5, 40.0) atol = 1e-9
 
         stick = RectangularTube(3.0, 3.0, 80.0, 0.120)
         blank = saw(stick, 40.0)
@@ -168,14 +128,13 @@ end
             upright = drill(upright, Circle(1.0), place(front, 1.5, y), ThroughAll())
         end
         drilled = ManufacturingGraph(upright)
+        repeated = filter(op -> op isa Drill, operations(upright))
         @test length(drilled.nodes) == 2 + length(ys)
         @test length(operations(upright)) == length(drilled.nodes) - 1
         @test operation(drilled.nodes[2]) isa Saw
-        repeated = hole_table(upright)
         @test length(repeated) == length(ys)
-        @test [row.index for row in repeated] == 1:length(ys)
-        @test [row.local_y for row in repeated] ≈ collect(ys) atol = 1e-9
-        @test all(row -> row.local_x ≈ 1.5 && row.diameter === 1.0 && row.penetration isa ThroughAll, repeated)
+        @test all(op -> op.profile.diameter === 1.0 && op.penetration isa ThroughAll, repeated)
+        @test [origin(op.datum)[3] for op in repeated] ≈ collect(ys) atol = 1e-9
     end
 
     @testset "DOT string generation" begin
@@ -238,6 +197,5 @@ end
         @test sprint(show, ManufacturingGraph(parts.second)) == "ManufacturingGraph(4 nodes)"
         @test !occursin("AffineMap", sprint(show, ManufacturingGraph(parts.second)))
         @test startswith(sprint(show, MIME("text/plain"), ManufacturingGraph(one)), "digraph ManufacturingGraph {")
-        @test occursin("diameter=1.0", sprint(show, hole_table(parts.second)[1]))
     end
 end

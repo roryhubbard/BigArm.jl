@@ -22,7 +22,6 @@ export AbstractPart,
     Saw,
     Drill,
     ManufacturingGraph,
-    HoleTableRow,
     operation,
     isstock,
     origin,
@@ -35,8 +34,7 @@ export AbstractPart,
     saw,
     drill,
     operations,
-    hole_table,
-    to_dot
+    to_dot,
 
 include("primitives.jl")
 include("graph.jl")

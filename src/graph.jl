@@ -31,60 +31,6 @@ function operations(part::AbstractPart)
     return AbstractOperation[operation(node) for node in ManufacturingGraph(part).nodes if !isstock(node)]
 end
 
-"""
-    HoleTableRow
-
-One drilled hole, read back from a part's manufacturing graph.
-
-`index` is chronological, starting at 1. `local_x` and `local_y` are the hole
-center in the entry-face datum (bottom-left origin, inches).
-`position_in_part_frame` and `normal_in_part_frame` are the center and outward
-normal in the part frame.
-"""
-struct HoleTableRow
-    index::Int
-    diameter::Float64
-    local_x::Float64
-    local_y::Float64
-    position_in_part_frame::SVector{3,Float64}
-    normal_in_part_frame::SVector{3,Float64}
-    penetration::AbstractPenetration
-end
-
-function _hole_row(part::RectangularTube, op::Drill, index::Int)
-    _, local_x, local_y = _match_face(part, op.datum)
-    return HoleTableRow(
-        index,
-        op.profile.diameter,
-        Float64(local_x),
-        Float64(local_y),
-        SVector{3,Float64}(origin(op.datum)),
-        SVector{3,Float64}(zaxis(op.datum)),
-        op.penetration,
-    )
-end
-
-"""
-    hole_table(part::AbstractPart) -> Vector{HoleTableRow}
-
-Inspection read of every `Drill` in the manufacturing graph of `part`, in
-chronological order. Non-drill operations are omitted. Local coordinates are
-measured on the part node that drill produced. Holes are reported even if a
-later `saw` shortened the tube past them: the table is a read of the graph,
-not a filter of the current solid.
-"""
-function hole_table(part::AbstractPart)
-    rows = HoleTableRow[]
-    index = 0
-    for node in ManufacturingGraph(part).nodes
-        op = operation(node)
-        op isa Drill || continue
-        index += 1
-        push!(rows, _hole_row(node, op, index))
-    end
-    return rows
-end
-
 # Six decimal places suppresses RotX(π/2) noise (~1e-16) in DOT labels without
 # changing shop-inch coordinates. Signed zero is canonicalized so labels are stable.
 function _fmt(x::Real)
@@ -154,13 +100,5 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", g::ManufacturingGraph)
     print(io, to_dot(g))
-    return nothing
-end
-
-function Base.show(io::IO, row::HoleTableRow)
-    print(io, "HoleTableRow(")
-    print(io, row.index, ", diameter=", _fmt(row.diameter))
-    print(io, ", local=(", _fmt(row.local_x), ", ", _fmt(row.local_y), "), ")
-    print(io, nameof(typeof(row.penetration)), ")")
     return nothing
 end
