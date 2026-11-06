@@ -5,4 +5,5 @@ using Test
     include("primitives.jl")
     include("graph.jl")
     include("geometry.jl")
+    include("ghd.jl")
 end
