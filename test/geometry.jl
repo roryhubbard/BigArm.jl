@@ -1,6 +1,7 @@
 using CoordinateTransformations: LinearMap, Translation
-using GeometryBasics: GeometryBasics, Mesh, coordinates, faces
+using GeometryBasics: GeometryBasics, Mesh, Point2d, coordinates, faces
 using LinearAlgebra: cross, dot, norm
+using MeshCat: MeshCat, Visualizer
 using Rotations: RotX
 using StaticArrays: SVector
 
@@ -169,13 +170,13 @@ end
         b = BigArm._MeshBuilder()
         plate_datum = Datum(Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0)))
         outer = BigArm._rect_loop(0.0, 0.0, 6.0, 4.0)
-        hole_loop = [p + SVector(3.0, 2.0) for p in BigArm._contour(Circle(1.0))]
+        hole_loop = Point2d[Point2d(p[1] + 3.0, p[2] + 2.0) for p in BigArm._contour(Circle(1.0))]
         BigArm._add_slab!(
             b,
             plate_datum,
             outer,
             outer,
-            [(hole_loop, SVector(3.0, 2.0))],
+            [hole_loop],
             0.25;
             close_perimeter=true,
         )
@@ -189,5 +190,28 @@ end
 
         struct UnmeshedPart <: AbstractPart end
         @test_throws MethodError derive_mesh(UnmeshedPart())
+    end
+
+    @testset "Geometry and graph visualization" begin
+        vis = Visualizer()
+        for p in (stick, blank, one_hole, multi_hole)
+            returned = visualize(p; vis=vis, open_browser=false)
+            @test returned === vis
+        end
+        html = MeshCat.static_html(vis)
+        @test occursin("BufferGeometry", html)
+        MeshCat.close_server!(vis.core)
+
+        g = ManufacturingGraph(multi_hole)
+        buf = IOBuffer()
+        dot_out = visualize(g; open_browser=false, dot_cmd=nothing, io=buf)
+        @test dot_out == to_dot(g)
+        @test String(take!(buf)) == to_dot(g)
+
+        if !isnothing(Sys.which("dot"))
+            svg_out = visualize(g; open_browser=false)
+            @test occursin("<svg", svg_out)
+            @test occursin("ManufacturingGraph", svg_out)
+        end
     end
 end

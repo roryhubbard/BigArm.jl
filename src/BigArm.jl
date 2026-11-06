@@ -3,8 +3,9 @@ module BigArm
 import Base: parent
 
 using CoordinateTransformations: AffineMap, LinearMap, Translation
-using GeometryBasics: Mesh, Point3d, TriangleFace
+using GeometryBasics: Mesh, Point2d, Point3d, TriangleFace, coordinates, faces
 using LinearAlgebra: dot, norm, normalize
+using MeshCat: MeshCat, MeshPhongMaterial, Visualizer, delete!, setobject!, setprop!, settransform!
 using Rotations: Rotation, RotX, RotZ
 using StaticArrays: SVector
 using Triangulate: TriangulateIO, triangulate
@@ -37,10 +38,12 @@ export AbstractPart,
     drill,
     operations,
     to_dot,
-    derive_mesh
+    derive_mesh,
+    visualize
 
 include("primitives.jl")
 include("graph.jl")
 include("geometry.jl")
+include("visualization.jl")
 
 end

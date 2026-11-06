@@ -1,6 +1,6 @@
 const _CIRCLE_SEGMENTS = 32
 
-function _signed_area(loop::AbstractVector{SVector{2,Float64}})
+function _signed_area(loop::AbstractVector{Point2d})
     n = length(loop)
     acc = 0.0
     for i in 1:n
@@ -12,38 +12,38 @@ function _signed_area(loop::AbstractVector{SVector{2,Float64}})
 end
 
 function _rect_loop(x0::Real, y0::Real, x1::Real, y1::Real)
-    return SVector{2,Float64}[
-        SVector(Float64(x0), Float64(y0)),
-        SVector(Float64(x1), Float64(y0)),
-        SVector(Float64(x1), Float64(y1)),
-        SVector(Float64(x0), Float64(y1)),
+    return Point2d[
+        Point2d(Float64(x0), Float64(y0)),
+        Point2d(Float64(x1), Float64(y0)),
+        Point2d(Float64(x1), Float64(y1)),
+        Point2d(Float64(x0), Float64(y1)),
     ]
 end
 
 """
-    _contour(profile::AbstractProfile) -> Vector{SVector{2,Float64}}
+    _contour(profile::AbstractProfile) -> Vector{Point2d}
 
 Return a counter-clockwise 2D polygon loop approximating `profile` in its local
 datum XY plane centered at `(0, 0)`.
 """
 function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
     r = profile.diameter / 2.0
-    return SVector{2,Float64}[
-        SVector(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
+    return Point2d[
+        Point2d(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
         for i in 1:segments
     ]
 end
 
-function _project_2d(T, u::SVector{2,Float64})
+function _project_2d(T, u::Point2d)
     p = T(SVector(u[1], u[2], 0.0))
-    return SVector(p[1], p[2])
+    return Point2d(p[1], p[2])
 end
 
 function _project_hole(op::Drill, onto::Datum)
     T = inv(onto.transform) ∘ op.datum.transform
     loop = [_project_2d(T, u) for u in _contour(op.profile)]
     _signed_area(loop) < 0.0 && reverse!(loop)
-    return (loop, _project_2d(T, SVector(0.0, 0.0)))
+    return loop
 end
 
 function _pierces_face(op::Drill, face::Datum)
@@ -56,63 +56,16 @@ function _face_holes(
     face::Datum;
     y_max::Union{Nothing,Real}=nothing,
 )
-    result = Tuple{Vector{SVector{2,Float64}},SVector{2,Float64}}[]
+    result = Vector{Point2d}[]
     for op in holes(part)
         _pierces_face(op, face) || continue
-        loop, seed = _project_hole(op, face)
+        loop = _project_hole(op, face)
         if !isnothing(y_max)
             all(p -> 0.0 < p[2] < y_max, loop) || continue
         end
-        push!(result, (loop, seed))
+        push!(result, loop)
     end
     return result
-end
-
-"""
-    _triangulate_2d(outer, hole_loops) -> (Vector{SVector{2,Float64}}, Vector{NTuple{3,Int}})
-
-Triangulate a 2D planar region bounded by counter-clockwise polygon `outer` and
-perforated by `hole_loops` (each a `(loop, interior_point)` pair) using
-constrained Delaunay triangulation (`Triangulate.jl` with `"pQY"`).
-"""
-function _triangulate_2d(
-    outer::AbstractVector{SVector{2,Float64}},
-    hole_loops::AbstractVector{Tuple{Vector{SVector{2,Float64}},SVector{2,Float64}}}=Tuple{Vector{SVector{2,Float64}},SVector{2,Float64}}[],
-)
-    pts = SVector{2,Float64}[]
-    segs = Tuple{Int32,Int32}[]
-
-    function add_loop!(loop)
-        base = Int32(length(pts))
-        n = Int32(length(loop))
-        append!(pts, loop)
-        for i in Int32(1):n
-            push!(segs, (base + i, base + (i == n ? Int32(1) : i + Int32(1))))
-        end
-    end
-
-    add_loop!(outer)
-    for (loop, _) in hole_loops
-        add_loop!(loop)
-    end
-
-    triin = TriangulateIO()
-    triin.pointlist = [j == 1 ? p[1] : p[2] for j in 1:2, p in pts]
-    triin.segmentlist = [j == 1 ? s[1] : s[2] for j in 1:2, s in segs]
-    if !isempty(hole_loops)
-        triin.holelist = [j == 1 ? h[2][1] : h[2][2] for j in 1:2, h in hole_loops]
-    end
-
-    triout, _ = triangulate("pQY", triin)
-    out_pts = [
-        SVector(triout.pointlist[1, i], triout.pointlist[2, i])
-        for i in axes(triout.pointlist, 2)
-    ]
-    out_tris = [
-        (Int(triout.trianglelist[1, i]), Int(triout.trianglelist[2, i]), Int(triout.trianglelist[3, i]))
-        for i in axes(triout.trianglelist, 2)
-    ]
-    return out_pts, out_tris
 end
 
 struct _MeshBuilder
@@ -131,11 +84,52 @@ function _vertex!(b::_MeshBuilder, p::SVector{3,Float64})
     end
 end
 
+function _triangulate_2d(
+    outer::AbstractVector{Point2d},
+    hole_loops::AbstractVector{<:AbstractVector{Point2d}}=Vector{Point2d}[],
+)
+    pts = Point2d[]
+    segs = Tuple{Int32,Int32}[]
+
+    function add_loop!(loop)
+        base = Int32(length(pts))
+        n = Int32(length(loop))
+        append!(pts, loop)
+        for i in Int32(1):n
+            push!(segs, (base + i, base + (i == n ? Int32(1) : i + Int32(1))))
+        end
+    end
+
+    add_loop!(outer)
+    for loop in hole_loops
+        add_loop!(loop)
+    end
+
+    triin = TriangulateIO()
+    triin.pointlist = [j == 1 ? p[1] : p[2] for j in 1:2, p in pts]
+    triin.segmentlist = [j == 1 ? s[1] : s[2] for j in 1:2, s in segs]
+    if !isempty(hole_loops)
+        seeds = [sum(loop) / length(loop) for loop in hole_loops]
+        triin.holelist = [j == 1 ? c[1] : c[2] for j in 1:2, c in seeds]
+    end
+
+    triout, _ = triangulate("pQY", triin)
+    out_pts = [
+        Point2d(triout.pointlist[1, i], triout.pointlist[2, i])
+        for i in axes(triout.pointlist, 2)
+    ]
+    out_tris = [
+        (Int(triout.trianglelist[1, i]), Int(triout.trianglelist[2, i]), Int(triout.trianglelist[3, i]))
+        for i in axes(triout.trianglelist, 2)
+    ]
+    return out_pts, out_tris
+end
+
 function _add_planar_face!(
     b::_MeshBuilder,
     datum::Datum,
-    outer::AbstractVector{SVector{2,Float64}},
-    hole_loops::AbstractVector{Tuple{Vector{SVector{2,Float64}},SVector{2,Float64}}}=Tuple{Vector{SVector{2,Float64}},SVector{2,Float64}}[];
+    outer::Vector{Point2d},
+    hole_loops::Vector{Vector{Point2d}}=Vector{Point2d}[];
     z::Real=0.0,
     flip::Bool=false,
 )
@@ -155,7 +149,7 @@ end
 function _add_extruded_loop!(
     b::_MeshBuilder,
     datum::Datum,
-    loop::AbstractVector{SVector{2,Float64}};
+    loop::AbstractVector{Point2d};
     z_front::Real=0.0,
     z_back::Real,
     outward::Bool=false,
@@ -191,9 +185,9 @@ around the perimeter when `close_perimeter=true`.
 function _add_slab!(
     b::_MeshBuilder,
     datum::Datum,
-    outer_front::AbstractVector{SVector{2,Float64}},
-    outer_back::AbstractVector{SVector{2,Float64}},
-    hole_loops::AbstractVector{Tuple{Vector{SVector{2,Float64}},SVector{2,Float64}}},
+    outer_front::Vector{Point2d},
+    outer_back::Vector{Point2d},
+    hole_loops::Vector{Vector{Point2d}},
     thickness::Real;
     close_perimeter::Bool=false,
 )
@@ -203,7 +197,7 @@ function _add_slab!(
     if close_perimeter
         _add_extruded_loop!(b, datum, outer_front; z_front=0.0, z_back=-t, outward=true)
     end
-    for (loop, _) in hole_loops
+    for loop in hole_loops
         _add_extruded_loop!(b, datum, loop; z_front=0.0, z_back=-t, outward=false)
     end
     return nothing
@@ -222,13 +216,13 @@ function derive_mesh(part::RectangularTube)
         w = _face_width(part, face)
         outer_rect = _rect_loop(0.0, 0.0, w, part.length)
         inner_rect = _rect_loop(t, 0.0, w - t, part.length)
-        wall_hohmsfactory61les = _face_holes(part, face; y_max=part.length)
+        wall_holes = _face_holes(part, face; y_max=part.length)
         _add_slab!(b, face, outer_rect, inner_rect, wall_holes, t)
     end
 
     cap_datum = Datum(Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0)))
     cap_outer = _rect_loop(0.0, 0.0, part.width, part.height)
-    cap_cavity = [(_rect_loop(t, t, part.width - t, part.height - t), SVector(part.width / 2.0, part.height / 2.0))]
+    cap_cavity = [_rect_loop(t, t, part.width - t, part.height - t)]
     _add_planar_face!(b, cap_datum, cap_outer, cap_cavity; z=0.0, flip=true)
     _add_planar_face!(b, cap_datum, cap_outer, cap_cavity; z=part.length, flip=false)
 
