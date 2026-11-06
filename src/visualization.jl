@@ -39,9 +39,7 @@ function visualize(
     setobject!(vis[:part], _flat_mesh(mesh), material)
     settransform!(vis[:part], Translation(-center))
 
-    cam = vis["/Cameras/default/rotated/<object>"]
-    setprop!(cam, "position", [1.2 * radius, 0.4 * radius, 1.6 * radius])
-    setprop!(cam, "far", max(1000.0, 20.0 * radius))
+    settransform!(vis["/Cameras/default"], LinearMap(RotZ(-π / 2)))
 
     open_browser && open(vis)
     return vis
@@ -50,37 +48,25 @@ end
 """
     visualize(
         g::ManufacturingGraph;
-        path::Union{Nothing,AbstractString}=nothing,
-        open_browser::Bool=isinteractive(),
-        dot_cmd::Union{Nothing,AbstractString}=Sys.which("dot"),
-        io::IO=stdout,
+        path::AbstractString="manufacturing_graph.dot",
+        open_viewer::Bool=isinteractive(),
     ) -> String
 
-Render `g` to SVG via Graphviz `dot` when installed, or print and return the
-DOT representation to `io` as a terminal fallback. Writes the output to `path`
-when provided.
+Write `g` as a Graphviz `.dot` file to `path` and view it with `dot -Tx11` when
+Graphviz is installed (or print the DOT text as a terminal fallback).
 """
 function visualize(
     g::ManufacturingGraph;
-    path::Union{Nothing,AbstractString}=nothing,
-    open_browser::Bool=isinteractive(),
-    dot_cmd::Union{Nothing,AbstractString}=Sys.which("dot"),
-    io::IO=stdout,
+    path::AbstractString="manufacturing_graph.dot",
+    open_viewer::Bool=isinteractive(),
 )
     dot = to_dot(g)
+    write(path, dot)
+    dot_cmd = Sys.which("dot")
     if isnothing(dot_cmd)
-        !isnothing(path) && write(path, dot)
-        print(io, dot)
-        return dot
+        print(dot)
+    elseif open_viewer
+        run(`$dot_cmd -Tx11 $path`; wait=false)
     end
-
-    svg = read(pipeline(IOBuffer(dot), `$dot_cmd -Tsvg`), String)
-    if !isnothing(path)
-        write(path, svg)
-    elseif open_browser
-        svg_path = tempname() * ".svg"
-        write(svg_path, svg)
-        MeshCat.open_url(svg_path)
-    end
-    return svg
+    return dot
 end

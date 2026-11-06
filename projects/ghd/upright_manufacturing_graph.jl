@@ -14,11 +14,7 @@ function main()
       upright = drill(upright, hole, d, ThroughAll())
   end
 
-  manufacturing_graph = ManufacturingGraph(upright)
-  write("upright.dot", to_dot(manufacturing_graph))
-
-  #visualize(upright)               # the drilled tube in MeshCat
-  #visualize(graph(upright))        # stock → saw → 50 drills → upright
+  return visualize(ManufacturingGraph(upright))
 end
 
 main()

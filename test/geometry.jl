@@ -203,15 +203,10 @@ end
         MeshCat.close_server!(vis.core)
 
         g = ManufacturingGraph(multi_hole)
-        buf = IOBuffer()
-        dot_out = visualize(g; open_browser=false, dot_cmd=nothing, io=buf)
+        dot_path = tempname() * ".dot"
+        dot_out = visualize(g; path=dot_path, open_viewer=false)
         @test dot_out == to_dot(g)
-        @test String(take!(buf)) == to_dot(g)
-
-        if !isnothing(Sys.which("dot"))
-            svg_out = visualize(g; open_browser=false)
-            @test occursin("<svg", svg_out)
-            @test occursin("ManufacturingGraph", svg_out)
-        end
+        @test read(dot_path, String) == to_dot(g)
+        rm(dot_path; force=true)
     end
 end
