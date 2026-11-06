@@ -197,5 +197,29 @@ end
         @test sprint(show, ManufacturingGraph(parts.second)) == "ManufacturingGraph(4 nodes)"
         @test !occursin("AffineMap", sprint(show, ManufacturingGraph(parts.second)))
         @test startswith(sprint(show, MIME("text/plain"), ManufacturingGraph(one)), "digraph ManufacturingGraph {")
+
+        raw_plate = Plate(8.0, 4.0, 0.1875)
+        top = datum(raw_plate, SVector(0, 0, 1))
+        plate_h1 = drill(raw_plate, Circle(1.0), place(top, 2.0, 2.0), ThroughAll())
+        plate_h2 = drill(plate_h1, Circle(0.625), place(top, 6.0, 2.0), ThroughAll())
+        plate_g = ManufacturingGraph(plate_h2)
+        @test length(plate_g.nodes) == 3
+        @test plate_g.nodes[1] === raw_plate
+        @test plate_g.nodes[2] === plate_h1
+        @test plate_g.nodes[3] === plate_h2
+        @test length(operations(plate_h2)) == 2
+        @test all(op -> op isa Drill && op.penetration isa ThroughAll, operations(plate_h2))
+        expected_plate_dot = join([
+            "digraph ManufacturingGraph {",
+            "  rankdir=TB;",
+            "  node [shape=box];",
+            "  n0 [label=\"stock Plate\\n8.0 × 4.0\\nt=0.1875\"];",
+            "  n1 [label=\"part Plate\\n8.0 × 4.0\\nt=0.1875\"];",
+            "  n2 [label=\"part Plate\\n8.0 × 4.0\\nt=0.1875\"];",
+            "  n0 -> n1 [label=\"Drill(Circle(1.0), (2.0, 2.0, 0.1875), ThroughAll)\"];",
+            "  n1 -> n2 [label=\"Drill(Circle(0.625), (6.0, 2.0, 0.1875), ThroughAll)\"];",
+            "}",
+        ], '\n') * '\n'
+        @test to_dot(plate_g) == expected_plate_dot
     end
 end

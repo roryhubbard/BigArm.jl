@@ -88,6 +88,42 @@ struct RectangularTube <: AbstractTube
 end
 
 """
+    Plate(width, height, thickness, parent=nothing, op=nothing)
+
+Flat rectangular plate part node with dimensions `width` (X), `height` (Y), and
+`thickness` (Z), all in inches (`Float64`).
+
+Raw plate stock is a root `Plate` whose `parent` and `op` are `nothing`.
+Enforces positive dimensions.
+"""
+struct Plate <: AbstractPart
+    width::Float64
+    height::Float64
+    thickness::Float64
+    parent::Union{Nothing,AbstractPart}
+    op::Union{Nothing,AbstractOperation}
+
+    function Plate(
+        width::Real,
+        height::Real,
+        thickness::Real,
+        parent::Union{Nothing,AbstractPart}=nothing,
+        op::Union{Nothing,AbstractOperation}=nothing,
+    )
+        w = Float64(width)
+        h = Float64(height)
+        t = Float64(thickness)
+        w > 0.0 || throw(DomainError(width, "Plate width must be positive"))
+        h > 0.0 || throw(DomainError(height, "Plate height must be positive"))
+        t > 0.0 || throw(DomainError(thickness, "Plate thickness must be positive"))
+        isnothing(parent) == isnothing(op) || throw(
+            ArgumentError("Plate parent and op must either both be nothing (raw stock) or both be present"),
+        )
+        return new(w, h, t, parent, op)
+    end
+end
+
+"""
     Circle(diameter)
 
 Circular 2D cut profile with positive `diameter` (inches, `Float64`).
@@ -137,6 +173,23 @@ function datums(part::RectangularTube)
         Datum(Translation(w,   0.0, 0.0) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2))),    # right (+X)
         Datum(Translation(w,   h,   0.0) ∘ LinearMap(RotZ(π) * RotX(π / 2))),        # back  (+Y)
         Datum(Translation(0.0, h,   0.0) ∘ LinearMap(RotZ(-π / 2) * RotX(π / 2))),   # left  (-X)
+    )
+end
+
+"""
+    datums(part::Plate) -> NTuple{2,Datum}
+
+Return the two flat surface `Datum` frames of a `Plate` (top `+Z` at
+`z = thickness` and bottom `-Z` at `z = 0`), each with `(0, 0)` at its
+bottom-left corner when looking straight at the face (`-zaxis`) with `+Y`
+pointing up.
+"""
+function datums(part::Plate)
+    w = part.width
+    t = part.thickness
+    return (
+        Datum(Translation(0.0, 0.0, t)   ∘ LinearMap(RotX(0.0))),                  # top    (+Z)
+        Datum(Translation(w,   0.0, 0.0) ∘ LinearMap(RotZ(π) * RotX(π))),          # bottom (-Z)
     )
 end
 
@@ -222,6 +275,7 @@ Each concrete `AbstractPart` implements this method of `Base.parent`. It is
 the single input of operations such as `saw` and `drill`.
 """
 parent(part::RectangularTube) = part.parent
+parent(part::Plate) = part.parent
 
 """
     operation(part) -> Union{Nothing,AbstractOperation}
@@ -233,6 +287,7 @@ Each concrete `AbstractPart` implements this. `parent(part)` and
 `operation(part)` are either both `nothing` or both present.
 """
 operation(part::RectangularTube) = part.op
+operation(part::Plate) = part.op
 
 """
     isstock(part::AbstractPart) -> Bool
@@ -272,13 +327,13 @@ function _face_width(part::RectangularTube, face::Datum)
 end
 
 """
-    _match_face(part::RectangularTube, datum::Datum) -> Tuple{Datum,Float64,Float64}
+    _match_face(part::AbstractPart, datum::Datum) -> Tuple{Datum,Float64,Float64}
 
 Find the outer `face` `Datum` on `part` whose normal matches `zaxis(datum)`,
 verify that `origin(datum)` lies on `face`'s surface (`z == 0`), and return
 `(face, x, y)` in `face`'s local 2D coordinates.
 """
-function _match_face(part::RectangularTube, datum::Datum)
+function _match_face(part::AbstractPart, datum::Datum)
     face = BigArm.datum(part, zaxis(datum))
     T_face_datum = inv(face.transform) ∘ datum.transform
     x, y, z = T_face_datum.translation
@@ -339,4 +394,48 @@ function drill(
 
     op = Drill(profile, datum, penetration)
     return RectangularTube(part.width, part.height, part.length, part.thickness, part, op)
+end
+
+"""
+    drill(
+        part::Plate,
+        profile::Circle,
+        datum::Datum,
+        penetration::AbstractPenetration,
+    )
+
+Drill circular `profile` into `part` at `datum` with `penetration`. Validates
+that `datum` lies on a valid flat surface of `part`, that the circle fits
+strictly within the plate perimeter (`diameter / 2 < x < width - diameter / 2`
+and `diameter / 2 < y < height - diameter / 2`), and for `Blind` holes that
+`penetration.depth < part.thickness`.
+"""
+function drill(
+    part::Plate,
+    profile::Circle,
+    datum::Datum,
+    penetration::AbstractPenetration,
+)
+    _, x, y = _match_face(part, datum)
+    r = profile.diameter / 2.0
+    (r < x && x < part.width - r) || throw(
+        ArgumentError(
+            "Hole (diameter=$(profile.diameter), x=$x) must lie wholly within plate width (0.0, $(part.width))",
+        ),
+    )
+    (r < y && y < part.height - r) || throw(
+        ArgumentError(
+            "Hole (diameter=$(profile.diameter), y=$y) must lie wholly within plate height (0.0, $(part.height))",
+        ),
+    )
+    if penetration isa Blind
+        penetration.depth < part.thickness || throw(
+            ArgumentError(
+                "Blind hole depth ($(penetration.depth)) must be strictly less than plate thickness ($(part.thickness))",
+            ),
+        )
+    end
+
+    op = Drill(profile, datum, penetration)
+    return Plate(part.width, part.height, part.thickness, part, op)
 end

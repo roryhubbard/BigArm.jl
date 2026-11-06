@@ -48,6 +48,12 @@ function _part_summary(part::RectangularTube)
     return "$kind RectangularTube\n$dims\nt=$(_fmt(part.thickness))"
 end
 
+function _part_summary(part::Plate)
+    kind = isstock(part) ? "stock" : "part"
+    dims = "$(_fmt(part.width)) × $(_fmt(part.height))"
+    return "$kind Plate\n$dims\nt=$(_fmt(part.thickness))"
+end
+
 function _part_summary(part::AbstractPart)
     kind = isstock(part) ? "stock" : "part"
     return "$kind $(nameof(typeof(part)))"
