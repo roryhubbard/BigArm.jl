@@ -140,8 +140,10 @@ end
 
 const _ATOL = 1e-9
 
+const RigidTransform = AffineMap{<:Rotation{3},<:SVector{3}}
+
 """
-    Datum(transform::AffineMap{<:Rotation{3},<:SVector{3}})
+    Datum(transform::RigidTransform)
 
 Right-handed 3D coordinate frame (`SE(3)` rigid transformation relative to the
 part's 3D origin):
@@ -150,7 +152,7 @@ part's 3D origin):
 - `zaxis(datum)` is the outward surface normal (tools approach along `-zaxis(datum)`).
 """
 struct Datum <: AbstractDatum
-    transform::AffineMap{<:Rotation{3},<:SVector{3}}
+    transform::RigidTransform
 end
 
 origin(datum::Datum) = datum.transform.translation
@@ -438,4 +440,31 @@ function drill(
 
     op = Drill(profile, datum, penetration)
     return Plate(part.width, part.height, part.thickness, part, op)
+end
+
+"""
+    Assembly(parts)
+
+Multi-part 3D assembly positioning each `AbstractPart` in a shared right-handed
+3D coordinate frame via a `Pair` `part => transform`, where `transform` is a
+`RigidTransform` (`AffineMap{<:Rotation{3},<:SVector{3}}`).
+"""
+struct Assembly
+    parts::Vector{Pair{<:AbstractPart,<:RigidTransform}}
+
+    function Assembly(
+        parts::AbstractVector{<:Pair{<:AbstractPart,<:RigidTransform}},
+    )
+        isempty(parts) && throw(ArgumentError("Assembly must contain at least one part"))
+        return new(collect(Pair{<:AbstractPart,<:RigidTransform}, parts))
+    end
+end
+
+Base.length(assembly::Assembly) = length(assembly.parts)
+Base.iterate(assembly::Assembly, state...) = iterate(assembly.parts, state...)
+Base.getindex(assembly::Assembly, i::Integer) = assembly.parts[i]
+
+function Base.show(io::IO, assembly::Assembly)
+    print(io, "Assembly(", length(assembly.parts), " parts)")
+    return nothing
 end

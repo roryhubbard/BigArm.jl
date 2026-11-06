@@ -1,5 +1,5 @@
 using CoordinateTransformations: AffineMap, LinearMap, Translation
-using Rotations: RotX, RotZ
+using Rotations: Rotation, RotX, RotZ
 using StaticArrays: SVector
 
 at(d::Datum, x::Real, y::Real, z::Real=0.0) =
@@ -84,6 +84,19 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test yaxis(bottom) ≈ SVector(0.0, 1.0, 0.0) atol = 1e-12
         @test zaxis(bottom) ≈ SVector(0.0, 0.0, -1.0) atol = 1e-12
         @test origin(at(bottom, 1.5, 2.0)) ≈ SVector(4.5, 2.0, 0.0) atol = 1e-12
+
+        asm = Assembly([
+            stick => Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0)),
+            plate => Translation(3.0, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
+        ])
+        @test asm isa Assembly
+        @test !(asm isa AbstractPart)
+        @test length(asm) == 2
+        @test asm[1].first === stick
+        @test asm[2].first === plate
+        @test asm[1].second(SVector(1.0, 2.0, 3.0)) ≈ SVector(1.0, 2.0, 3.0) atol = 1e-12
+        @test asm[2].second(SVector(1.0, 2.0, 0.0)) ≈ SVector(4.0, 0.0, 12.0) atol = 1e-12
+        @test sprint(show, asm) == "Assembly(2 parts)"
     end
 
     @testset "Invalid construction" begin
@@ -115,6 +128,10 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
 
         @test_throws DomainError Blind(0.0)
         @test_throws DomainError Saw(0.0)
+
+        @test_throws ArgumentError Assembly(Pair{<:AbstractPart,<:RigidTransform}[])
+        @test_throws MethodError Assembly([plate => Translation(0.0, 0.0, 0.0) ∘ LinearMap([2.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0])])
+        @test_throws MethodError Assembly([plate => Translation(1.0, 2.0) ∘ LinearMap(RotX(0.0))])
     end
 
     @testset "Valid operation chains" begin

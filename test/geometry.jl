@@ -266,6 +266,15 @@ end
             returned = visualize(p; vis=vis, open_browser=false)
             @test returned === vis
         end
+        asm = Assembly([
+            one_hole => Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0)),
+            plate => Translation(-1.5, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
+        ])
+        returned_asm = visualize(asm; vis=vis, open_browser=false)
+        @test returned_asm === vis
+        root_node = vis.core.tree.children["meshcat"]
+        @test haskey(root_node.children, "part_1")
+        @test haskey(root_node.children, "part_2")
         html = MeshCat.static_html(vis)
         @test occursin("BufferGeometry", html)
         MeshCat.close_server!(vis.core)

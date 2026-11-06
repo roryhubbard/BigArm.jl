@@ -46,6 +46,26 @@ function visualize(
 end
 
 """
+    visualize(assembly::Assembly; vis::Visualizer=Visualizer(), open_browser::Bool=isinteractive()) -> Visualizer
+
+Render each part in `assembly` via `visualize(part)` under `vis[:part_i]` at its
+assembly 3D `transform`.
+"""
+function visualize(
+    assembly::Assembly;
+    vis::Visualizer=Visualizer(),
+    open_browser::Bool=isinteractive(),
+)
+    for (i, (part, transform)) in enumerate(assembly.parts)
+        node = vis[Symbol("part_$i")]
+        visualize(part; vis=node, open_browser=false)
+        settransform!(node[:part], transform)
+    end
+    open_browser && open(vis)
+    return vis
+end
+
+"""
     visualize(
         g::ManufacturingGraph;
         path::AbstractString="manufacturing_graph.dot",
