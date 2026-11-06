@@ -190,15 +190,27 @@ function _add_slab!(
     hole_loops::Vector{Vector{Point2d}},
     thickness::Real;
     close_perimeter::Bool=false,
+    front_blind::Vector{Tuple{Vector{Point2d},Float64}}=Tuple{Vector{Point2d},Float64}[],
+    back_blind::Vector{Tuple{Vector{Point2d},Float64}}=Tuple{Vector{Point2d},Float64}[],
 )
     t = Float64(thickness)
-    _add_planar_face!(b, datum, outer_front, hole_loops; z=0.0, flip=false)
-    _add_planar_face!(b, datum, outer_back, hole_loops; z=-t, flip=true)
+    front_holes = isempty(front_blind) ? hole_loops : vcat(hole_loops, first.(front_blind))
+    back_holes = isempty(back_blind) ? hole_loops : vcat(hole_loops, first.(back_blind))
+    _add_planar_face!(b, datum, outer_front, front_holes; z=0.0, flip=false)
+    _add_planar_face!(b, datum, outer_back, back_holes; z=-t, flip=true)
     if close_perimeter
         _add_extruded_loop!(b, datum, outer_front; z_front=0.0, z_back=-t, outward=true)
     end
     for loop in hole_loops
         _add_extruded_loop!(b, datum, loop; z_front=0.0, z_back=-t, outward=false)
+    end
+    for (loop, depth) in front_blind
+        _add_extruded_loop!(b, datum, loop; z_front=0.0, z_back=-depth, outward=false)
+        _add_planar_face!(b, datum, loop; z=-depth, flip=false)
+    end
+    for (loop, depth) in back_blind
+        _add_extruded_loop!(b, datum, loop; z_front=-t + depth, z_back=-t, outward=false)
+        _add_planar_face!(b, datum, loop; z=-t + depth, flip=true)
     end
     return nothing
 end
@@ -226,5 +238,46 @@ function derive_mesh(part::RectangularTube)
     _add_planar_face!(b, cap_datum, cap_outer, cap_cavity; z=0.0, flip=true)
     _add_planar_face!(b, cap_datum, cap_outer, cap_cavity; z=part.length, flip=false)
 
+    return Mesh(b.points, b.faces)
+end
+
+"""
+    derive_mesh(part::Plate) -> GeometryBasics.Mesh
+
+Derive a closed, watertight 3D triangle mesh for `part` from its dimensions and
+the `Drill` operations in its manufacturing history.
+"""
+function derive_mesh(part::Plate)
+    b = _MeshBuilder()
+    top = datum(part, SVector(0, 0, 1))
+    outer = _rect_loop(0.0, 0.0, part.width, part.height)
+    through_holes = Vector{Point2d}[]
+    front_blind = Tuple{Vector{Point2d},Float64}[]
+    back_blind = Tuple{Vector{Point2d},Float64}[]
+
+    for op in holes(part)
+        loop = _project_hole(op, top)
+        if op.penetration isa Blind
+            if dot(zaxis(op.datum), zaxis(top)) > 0.0
+                push!(front_blind, (loop, op.penetration.depth))
+            else
+                push!(back_blind, (loop, op.penetration.depth))
+            end
+        else
+            push!(through_holes, loop)
+        end
+    end
+
+    _add_slab!(
+        b,
+        top,
+        outer,
+        outer,
+        through_holes,
+        part.thickness;
+        close_perimeter=true,
+        front_blind=front_blind,
+        back_blind=back_blind,
+    )
     return Mesh(b.points, b.faces)
 end

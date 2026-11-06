@@ -192,9 +192,77 @@ end
         @test_throws MethodError derive_mesh(UnmeshedPart())
     end
 
+    @testset "Plate meshes" begin
+        raw_plate = Plate(6.0, 4.0, 0.25)
+        raw_mesh = derive_mesh(raw_plate)
+        @test raw_mesh isa Mesh
+        lo_p, hi_p = mesh_bbox(raw_mesh)
+        @test lo_p ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_p ≈ SVector(6.0, 4.0, 0.25) atol = 1e-12
+        raw_stats = check_manifold_and_volume(raw_mesh)
+        @test raw_stats.nverts == 8
+        @test raw_stats.nfaces == 12
+        @test raw_stats.euler == 2
+        @test raw_stats.volume ≈ 6.0 * 4.0 * 0.25 atol = 1e-9
+
+        top = datum(raw_plate, SVector(0, 0, 1))
+        bottom = datum(raw_plate, SVector(0, 0, -1))
+
+        # Single through-hole from top (+Z)
+        p1 = drill(raw_plate, Circle(1.0), Datum(top.transform ∘ Translation(2.0, 2.0, 0.0)), ThroughAll())
+        m1 = derive_mesh(p1)
+        lo_1, hi_1 = mesh_bbox(m1)
+        @test lo_1 ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_1 ≈ SVector(6.0, 4.0, 0.25) atol = 1e-12
+        s1 = check_manifold_and_volume(m1)
+        @test s1.euler == 0
+        @test isapprox(raw_stats.volume - s1.volume, π * 0.5^2 * 0.25; rtol=0.01)
+
+        pts1 = coordinates(m1)
+        for z_plane in (0.0, 0.25)
+            @test count(
+                p -> isapprox(p[3], z_plane; atol=1e-9) && isapprox(hypot(p[1] - 2.0, p[2] - 2.0), 0.5; atol=1e-9),
+                pts1,
+            ) == BigArm._CIRCLE_SEGMENTS
+        end
+
+        # Second through-hole from bottom (-Z) with ThroughWall (at bottom x=1.5 -> 3D X=4.5)
+        p2 = drill(p1, Circle(1.0), Datum(bottom.transform ∘ Translation(1.5, 2.0, 0.0)), ThroughWall())
+        m2 = derive_mesh(p2)
+        s2 = check_manifold_and_volume(m2)
+        @test s2.euler == -2
+        @test (raw_stats.volume - s2.volume) ≈ 2.0 * (raw_stats.volume - s1.volume) atol = 1e-9
+
+        pts2 = coordinates(m2)
+        for z_plane in (0.0, 0.25)
+            @test count(
+                p -> isapprox(p[3], z_plane; atol=1e-9) && isapprox(hypot(p[1] - 4.5, p[2] - 2.0), 0.5; atol=1e-9),
+                pts2,
+            ) == BigArm._CIRCLE_SEGMENTS
+        end
+
+        # Blind holes from top and bottom surfaces
+        p3 = drill(p2, Circle(0.5), Datum(top.transform ∘ Translation(3.25, 1.0, 0.0)), Blind(0.1))
+        p4 = drill(p3, Circle(0.5), Datum(bottom.transform ∘ Translation(2.75, 3.0, 0.0)), Blind(0.1))
+        for node in ManufacturingGraph(p4).nodes
+            mn = derive_mesh(node)
+            @test mn isa Mesh
+            check_manifold_and_volume(mn)
+        end
+        s4 = check_manifold_and_volume(derive_mesh(p4))
+        @test s4.euler == -2
+        @test isapprox(s2.volume - s4.volume, 2.0 * π * 0.25^2 * 0.1; rtol=0.01)
+    end
+
     @testset "Geometry and graph visualization" begin
         vis = Visualizer()
-        for p in (stick, blank, one_hole, multi_hole)
+        plate = drill(
+            Plate(6.0, 4.0, 0.25),
+            Circle(1.0),
+            Datum(Translation(2.0, 2.0, 0.25) ∘ LinearMap(RotX(0.0))),
+            ThroughAll(),
+        )
+        for p in (stick, blank, one_hole, multi_hole, plate)
             returned = visualize(p; vis=vis, open_browser=false)
             @test returned === vis
         end
