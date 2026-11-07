@@ -452,11 +452,9 @@ Multi-part 3D assembly positioning each `AbstractPart` in a shared right-handed
 struct Assembly
     parts::Vector{Pair{<:AbstractPart,<:RigidTransform}}
 
-    function Assembly(
-        parts::AbstractVector{<:Pair{<:AbstractPart,<:RigidTransform}},
-    )
+    function Assembly(parts::AbstractVector{<:Pair})
         isempty(parts) && throw(ArgumentError("Assembly must contain at least one part"))
-        return new(collect(Pair{<:AbstractPart,<:RigidTransform}, parts))
+        return new(Pair{<:AbstractPart,<:RigidTransform}[p.first => p.second for p in parts])
     end
 end
 
