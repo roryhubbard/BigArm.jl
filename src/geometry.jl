@@ -33,7 +33,7 @@ end
 function _project_hole(op::Union{Drill,Cut}, onto::Datum)
     T = inv(onto.transform) ∘ op.datum.transform
     loop = [_project_2d(T, u) for u in _contour(op.profile)]
-    _signed_area(loop) < 0.0 && reverse!(loop)
+    _is_ccw(_to_geos_polygon(loop)) || reverse!(loop)
     return loop
 end
 
@@ -50,11 +50,13 @@ function _face_holes(
     bounds_poly::Union{Nothing,AbstractVector{Point2d}}=nothing,
 )
     result = Vector{Point2d}[]
+    shrunk_bounds =
+        isnothing(bounds_poly) ? nothing : LibGEOS.buffer(_to_geos_polygon(bounds_poly), -_ATOL)
     for op in operations_of_type(Union{Drill,Cut}, part)
         _pierces_face(op, face) || continue
         loop = _project_hole(op, face)
-        if !isnothing(bounds_poly)
-            all(p -> _inside_convex_polygon(p, bounds_poly), loop) || continue
+        if !isnothing(shrunk_bounds)
+            LibGEOS.contains(shrunk_bounds, _to_geos_polygon(loop)) || continue
         end
         push!(result, loop)
     end
@@ -319,7 +321,9 @@ the `Saw`, `Drill`, and `Cut` operations in its manufacturing history.
 function derive_mesh(part::Plate)
     b = _MeshBuilder()
     top = datum(part, SVector(0, 0, 1))
-    outer = _plate_outline(part)
+    outer_poly = _plate_polygon(part)
+    shrunk_outer = LibGEOS.buffer(outer_poly, -_ATOL)
+    outer = _from_geos_polygon(outer_poly)
     through_holes = Vector{Point2d}[]
     front_blind = Tuple{Vector{Point2d},Float64}[]
     back_blind = Tuple{Vector{Point2d},Float64}[]
@@ -327,7 +331,7 @@ function derive_mesh(part::Plate)
     for op in operations(part)
         if op isa Drill
             loop = _project_hole(op, top)
-            all(p -> _inside_convex_polygon(p, outer), loop) || continue
+            LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
             if op.penetration isa Blind
                 if dot(zaxis(op.datum), zaxis(top)) > 0.0
                     push!(front_blind, (loop, op.penetration.depth))
@@ -339,7 +343,7 @@ function derive_mesh(part::Plate)
             end
         elseif op isa Cut
             loop = _project_hole(op, top)
-            all(p -> _inside_convex_polygon(p, outer), loop) || continue
+            LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
             push!(through_holes, loop)
         end
     end

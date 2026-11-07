@@ -177,15 +177,23 @@ struct Circle <: AbstractProfile
     end
 end
 
-function _signed_area(loop::AbstractVector{Point2d})
-    n = length(loop)
-    acc = 0.0
-    for i in 1:n
-        p1 = loop[i]
-        p2 = loop[i == n ? 1 : i + 1]
-        acc += p1[1] * p2[2] - p2[1] * p1[2]
-    end
-    return 0.5 * acc
+const _ATOL = 1e-9
+
+function _to_geos_polygon(loop::AbstractVector{Point2d})
+    coords = Vector{Float64}[[p[1], p[2]] for p in loop]
+    push!(coords, [loop[1][1], loop[1][2]])
+    return LibGEOS.Polygon([coords])
+end
+
+_is_ccw(poly::LibGEOS.Polygon) =
+    LibGEOS.isCCW(LibGEOS.getCoordSeq(LibGEOS.exteriorRing(poly)))
+
+function _from_geos_polygon(poly::LibGEOS.Polygon)
+    seq = LibGEOS.getCoordSeq(LibGEOS.exteriorRing(poly))
+    coords = LibGEOS.getCoordinates(seq)
+    pts = Point2d[Point2d(c[1], c[2]) for c in @view coords[1:(end - 1)]]
+    LibGEOS.isCCW(seq) || reverse!(pts)
+    return pts
 end
 
 """
@@ -201,9 +209,9 @@ struct Polygon <: AbstractProfile
     function Polygon(points::AbstractVector{<:AbstractVector{<:Real}})
         length(points) >= 3 || throw(ArgumentError("Polygon must have at least 3 vertices"))
         pts = Point2d[Point2d(Float64(p[1]), Float64(p[2])) for p in points]
-        area = _signed_area(pts)
-        abs(area) > 1e-9 || throw(ArgumentError("Polygon vertices must not be collinear"))
-        area < 0.0 && reverse!(pts)
+        poly = _to_geos_polygon(pts)
+        LibGEOS.area(poly) > _ATOL || throw(ArgumentError("Polygon vertices must not be collinear"))
+        _is_ccw(poly) || reverse!(pts)
         return new(pts)
     end
 end
@@ -228,8 +236,6 @@ function Rectangle(width::Real, height::Real)
         Point2d(-hw,  hh),
     ])
 end
-
-const _ATOL = 1e-9
 
 const RigidTransform = Union{
     AffineMap{<:Rotation{3},<:SVector{3,<:Real}},
@@ -503,67 +509,35 @@ function _cross_section_points(part::RoundTube)
     ]
 end
 
-function _clip_polygon(
-    poly::AbstractVector{Point2d},
+function _halfplane_polygon(
+    poly::LibGEOS.Polygon,
     p0::SVector{3,Float64},
     n::SVector{3,Float64},
 )
-    out = Point2d[]
-    len = length(poly)
-    for i in 1:len
-        a = poly[i]
-        b = poly[i == len ? 1 : i + 1]
-        da = (a[1] - p0[1]) * n[1] + (a[2] - p0[2]) * n[2]
-        db = (b[1] - p0[1]) * n[1] + (b[2] - p0[2]) * n[2]
-        a_in = da <= _ATOL
-        b_in = db <= _ATOL
-        if a_in && b_in
-            push!(out, b)
-        elseif a_in && !b_in
-            t = da / (da - db)
-            if abs(da) > _ATOL
-                push!(out, Point2d(a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])))
-            end
-        elseif !a_in && b_in
-            t = da / (da - db)
-            if abs(db) > _ATOL
-                push!(out, Point2d(a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])))
-            end
-            push!(out, b)
-        end
-    end
-    return out
+    c = SVector(p0[1], p0[2])
+    u = SVector(n[1], n[2])
+    v = SVector(-u[2], u[1])
+    xmin, xmax = LibGEOS.getXMin(poly), LibGEOS.getXMax(poly)
+    ymin, ymax = LibGEOS.getYMin(poly), LibGEOS.getYMax(poly)
+    span = 2.0 * (hypot(xmax - xmin, ymax - ymin) + hypot(c[1] - xmin, c[2] - ymin) + 1.0)
+    return _to_geos_polygon(Point2d[
+        Point2d(c - span * v),
+        Point2d(c + span * v),
+        Point2d(c + span * v - span * u),
+        Point2d(c - span * v - span * u),
+    ])
 end
 
-function _inside_convex_polygon(
-    p::Point2d,
-    poly::AbstractVector{Point2d};
-    margin::Real=0.0,
-)
-    m = Float64(margin)
-    len = length(poly)
-    for i in 1:len
-        a = poly[i]
-        b = poly[i == len ? 1 : i + 1]
-        dx = b[1] - a[1]
-        dy = b[2] - a[2]
-        edge_len = hypot(dx, dy)
-        signed_dist = (dx * (p[2] - a[2]) - dy * (p[1] - a[1])) / edge_len
-        signed_dist > m + _ATOL || return false
-    end
-    return true
-end
-
-function _plate_outline(part::Plate)
+function _plate_polygon(part::Plate)
     root = _root_stock(part)
-    poly = Point2d[
+    poly = _to_geos_polygon(Point2d[
         Point2d(0.0, 0.0),
         Point2d(root.width, 0.0),
         Point2d(root.width, root.height),
         Point2d(0.0, root.height),
-    ]
+    ])
     for op in operations_of_type(Saw, part)
-        poly = _clip_polygon(poly, origin(op.datum), zaxis(op.datum))
+        poly = LibGEOS.intersection(poly, _halfplane_polygon(poly, origin(op.datum), zaxis(op.datum)))
     end
     return poly
 end
@@ -610,18 +584,15 @@ function saw(part::Plate, datum::Datum)
         ArgumentError("Plate saw datum normal $n must lie in the XY plane (z-component must be 0)"),
     )
     p0 = origin(datum)
-    poly = _plate_outline(part)
-    dists = [(p[1] - p0[1]) * n[1] + (p[2] - p0[2]) * n[2] for p in poly]
-    (minimum(dists) < -_ATOL && maximum(dists) > _ATOL) || throw(
+    poly = _plate_polygon(part)
+    clipped = LibGEOS.intersection(poly, _halfplane_polygon(poly, p0, n))
+    (clipped isa LibGEOS.Polygon && _ATOL < LibGEOS.area(clipped) < LibGEOS.area(poly) - _ATOL) || throw(
         ArgumentError(
             "Plate saw plane at $p0 with normal $n must slice through the plate interior",
         ),
     )
-    new_poly = _clip_polygon(poly, p0, n)
-    xs = [p[1] for p in new_poly]
-    ys = [p[2] for p in new_poly]
-    new_w = maximum(xs) - minimum(xs)
-    new_h = maximum(ys) - minimum(ys)
+    new_w = LibGEOS.getXMax(clipped) - LibGEOS.getXMin(clipped)
+    new_h = LibGEOS.getYMax(clipped) - LibGEOS.getYMin(clipped)
     op = Saw(datum)
     return _rebuild(part; width=new_w, height=new_h, parent=part, op=op)
 end
@@ -694,9 +665,9 @@ function drill(
 )
     _match_face(part, datum)
     r = profile.diameter / 2.0
-    poly = _plate_outline(part)
+    shrunk = LibGEOS.buffer(_plate_polygon(part), -(r + _ATOL))
     p3 = origin(datum)
-    _inside_convex_polygon(Point2d(p3[1], p3[2]), poly; margin=r) || throw(
+    LibGEOS.contains(shrunk, LibGEOS.Point(p3[1], p3[2])) || throw(
         ArgumentError(
             "Hole (diameter=$(profile.diameter)) at ($(p3[1]), $(p3[2])) must lie wholly within plate perimeter",
         ),
@@ -755,8 +726,7 @@ end
 
 Cut polygonal `profile` through `part`, where `profile` is expressed in the
 coordinate frame of `datum`. Validates that `datum` lies on a valid flat surface
-of `part` and that every vertex of `profile` fits strictly within the plate
-perimeter.
+of `part` and that `profile` fits strictly within the plate perimeter.
 """
 function cut(
     part::Plate,
@@ -764,15 +734,15 @@ function cut(
     datum::Datum,
 )
     _match_face(part, datum)
-    poly = _plate_outline(part)
-    for u in profile.points
-        p = datum.transform(SVector(u[1], u[2], 0.0))
-        _inside_convex_polygon(Point2d(p[1], p[2]), poly) || throw(
-            ArgumentError(
-                "Cutout vertex ($(p[1]), $(p[2])) must lie wholly within plate perimeter",
-            ),
-        )
-    end
+    shrunk = LibGEOS.buffer(_plate_polygon(part), -_ATOL)
+    cutout = _to_geos_polygon(Point2d[
+        Point2d(datum.transform(SVector(u[1], u[2], 0.0))[1:2]) for u in profile.points
+    ])
+    LibGEOS.contains(shrunk, cutout) || throw(
+        ArgumentError(
+            "Cutout at $(origin(datum)) must lie wholly within plate perimeter",
+        ),
+    )
 
     op = Cut(profile, datum)
     return _rebuild(part; parent=part, op=op)

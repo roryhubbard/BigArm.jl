@@ -4,6 +4,7 @@ import Base: parent
 
 using CoordinateTransformations: AffineMap, LinearMap, Translation
 using GeometryBasics: Mesh, Point2d, Point3d, TriangleFace, coordinates, faces
+using LibGEOS: LibGEOS
 using LinearAlgebra: dot, norm, normalize
 using MeshCat: MeshCat, MeshPhongMaterial, Visualizer, delete!, setobject!, setprop!, settransform!
 using Rotations: Rotation, RotMatrix3, RotX, RotZ
