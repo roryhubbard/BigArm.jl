@@ -8,16 +8,26 @@ view the full assembly in MeshCat.
 
 ## Phases
 
-### Phase 1: Cylindrical stock (`RoundTube`) and rectangular cutouts (`Rectangle`)
+### Phase 1: Cylindrical stock (`RoundTube`), polygonal cutouts (`Polygon` / `Rectangle`), and `Datum`-based `Saw`
 
-- Add `RoundTube <: AbstractTube` (if not already implemented) and
-  `Rectangle <: AbstractProfile` in `src/primitives.jl`.
-- Support cutting `Rectangle` through-windows in `Plate` parts and extend
-  `derive_mesh` in `src/geometry.jl` accordingly.
-- Cover valid/invalid cases and verify watertight manifold meshes in
-  `test/primitives.jl`, `test/graph.jl`, and `test/geometry.jl`.
+- Add `RoundTube <: AbstractTube` and `Polygon <: AbstractProfile` (with
+  `Rectangle(width, height)` convenience constructor) in `src/primitives.jl`.
+- Generalize `Saw` to take a `Datum` (supporting square cutoffs, miter saw cuts
+  on tubes, and bandsaw cuts along arbitrary lines on plates) and support
+  cutting `Polygon` profiles in `Plate` and `RectangularTube` parts.
+- Extend `derive_mesh` in `src/geometry.jl` and cover valid/invalid cases and
+  watertight manifold meshes in `test/primitives.jl`, `test/graph.jl`, and
+  `test/geometry.jl`.
 
-### Phase 2: Weldment primitive and DAG manufacturing graph
+### Phase 2: Simplify 2D polygon math with `LibGEOS.jl`
+
+- Add `LibGEOS.jl` to `Project.toml` and replace custom 2D polygon routines
+  (`_signed_area`, `_clip_polygon`, `_inside_convex_polygon`) in
+  `src/primitives.jl` and `src/geometry.jl` with `LibGEOS` operations
+  (intersection, inward `buffer`, `contains`, and `area`).
+- Verify all existing primitive, graph, and mesh tests pass with `LibGEOS`.
+
+### Phase 3: Weldment primitive and DAG manufacturing graph
 
 - Add a `Weld` operation / `Weldment <: AbstractPart` in `src/primitives.jl`
   that joins multiple `AbstractPart`s at relative `RigidTransform`s.
@@ -27,7 +37,7 @@ view the full assembly in MeshCat.
 - Verify DAG topology, DOT output, and meshes in `test/graph.jl` and
   `test/geometry.jl`.
 
-### Phase 3: Welded Echo GHD attachment & assembly
+### Phase 4: Welded Echo GHD attachment & assembly
 
 - Model the Design B welded attachment from `DIMENSIONS.md` in `projects/ghd/`:
   - Welded steel frame (windowed footplate, 7-hole upright side ears, central
