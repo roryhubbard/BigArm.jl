@@ -1,9 +1,25 @@
 name = "BigArm"
 uuid = "c8c8631a-90f4-493d-8242-0885b7b00943"
-authors = ["rory hubbard <calvin3h@gmail.com> and contributors"]
 version = "1.0.0-DEV"
+authors = ["rory hubbard <calvin3h@gmail.com> and contributors"]
+
+[deps]
+CoordinateTransformations = "150eb455-5306-5404-9cee-2592286d6298"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MeshCat = "283c5d60-a78f-5afe-a0af-af636b173e11"
+Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Triangulate = "f7e6ffb2-c36d-4f8f-a77e-16e897189344"
 
 [compat]
+CoordinateTransformations = "0.6.4"
+GeometryBasics = "0.5.13"
+LinearAlgebra = "1.13.0"
+MeshCat = "1.1.2"
+Rotations = "1.7.1"
+StaticArrays = "1.9.24"
+Triangulate = "3.0.2"
 julia = "1.13"
 
 [extras]
