@@ -37,10 +37,12 @@ function _project_hole(op::Union{Drill,Cut}, onto::Datum)
     return loop
 end
 
-function _pierces_face(op::Union{Drill,Cut}, face::Datum)
+function _pierces_face(op::Drill, face::Datum)
     d = dot(zaxis(op.datum), zaxis(face))
     return d > 1.0 - _ATOL || (op.penetration isa ThroughAll && d < -1.0 + _ATOL)
 end
+
+_pierces_face(op::Cut, face::Datum) = dot(zaxis(op.datum), zaxis(face)) > 1.0 - _ATOL
 
 function _face_holes(
     part::AbstractPart,

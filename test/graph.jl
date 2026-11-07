@@ -253,7 +253,7 @@ end
             "  node [shape=box];",
             "  n0 [label=\"stock Plate\\n24.0 × 14.0\\nt=0.1875\"];",
             "  n1 [label=\"part Plate\\n24.0 × 14.0\\nt=0.1875\"];",
-            "  n0 -> n1 [label=\"Cut(Rectangle(9.0, 8.5), (12.0, 7.0, 0.1875), ThroughAll)\"];",
+            "  n0 -> n1 [label=\"Cut(Rectangle(9.0, 8.5), (12.0, 7.0, 0.1875))\"];",
             "}",
         ], '\n') * '\n'
         @test to_dot(fp_g) == expected_fp_dot

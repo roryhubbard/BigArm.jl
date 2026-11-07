@@ -89,7 +89,6 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test cut_op isa AbstractOperation
         @test cut_op.profile === rect
         @test cut_op.datum === d
-        @test cut_op.penetration === ThroughAll()
 
         plate = Plate(6, 4, 0.1875)
         @test plate isa Plate
@@ -227,7 +226,7 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         miter_both = saw(miter_top, Datum(Translation(1.5, 1.5, 5.0) ∘ LinearMap(RotY(-3π / 4))))
         @test miter_both.length ≈ 51.5 - 3.5 atol = 1e-12
         miter_drilled = drill(miter_both, Circle(1.0), at(f, 1.5, 25.0), ThroughAll())
-        miter_slotted = cut(miter_drilled, Rectangle(1.0, 4.0), at(f, 1.5, 35.0), ThroughWall())
+        miter_slotted = cut(miter_drilled, Rectangle(1.0, 4.0), at(f, 1.5, 35.0))
         @test length(operations_of_type(Drill, miter_slotted)) == 1
         @test length(operations_of_type(Cut, miter_slotted)) == 1
 
@@ -334,9 +333,9 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws ArgumentError drill(blank, Circle(1.0), at(f, 2.5, 51.0), ThroughAll())
         @test_throws ArgumentError drill(blank, Circle(1.0), at(f, 1.5, 0.5), ThroughAll())
         @test_throws ArgumentError drill(blank, Circle(1.0), at(f, 1.5, 102.5), ThroughAll())
-        @test_throws ArgumentError cut(blank, Rectangle(3.0, 2.0), at(f, 1.5, 51.0), ThroughAll())
-        @test_throws ArgumentError cut(blank, Rectangle(1.0, 2.0), at(f, 1.5, 1.0), ThroughAll())
-        @test_throws ArgumentError cut(blank, Rectangle(1.0, 2.0), at(f, 1.5, 102.0), ThroughAll())
+        @test_throws ArgumentError cut(blank, Rectangle(3.0, 2.0), at(f, 1.5, 51.0))
+        @test_throws ArgumentError cut(blank, Rectangle(1.0, 2.0), at(f, 1.5, 1.0))
+        @test_throws ArgumentError cut(blank, Rectangle(1.0, 2.0), at(f, 1.5, 102.0))
 
         # Invalid tube saw cuts: beyond top, at/below bottom, or zero Z-normal
         @test_throws ArgumentError saw(blank, Datum(Translation(0.0, 0.0, 104.0)))
@@ -427,7 +426,7 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError drill(blank, Rectangle(1.0, 1.0), d, ThroughAll())
         @test_throws MethodError drill(blank, Circle(1.0), d, Blind(0.5))
         @test_throws MethodError cut(round_blank, Rectangle(0.5, 0.5), d)
-        @test_throws MethodError cut(round_blank, Rectangle(0.5, 0.5), d, ThroughAll())
+        @test_throws MethodError cut(blank, Rectangle(1.0, 1.0), d, ThroughAll())
 
         plate = Plate(6.0, 4.0, 0.25)
         dp = at(datum(plate, SVector(0, 0, 1)), 3.0, 2.0)

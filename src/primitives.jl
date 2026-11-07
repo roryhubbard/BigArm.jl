@@ -366,18 +366,13 @@ struct Drill <: AbstractOperation
 end
 
 """
-    Cut(profile::Polygon, datum::Datum, penetration::Union{ThroughAll,ThroughWall}=ThroughAll())
+    Cut(profile::Polygon, datum::Datum)
 
-Profile-cutting operation cutting polygonal `profile` in the coordinate frame of
-`datum` with `penetration` mode.
+Profile-cutting operation cutting polygonal `profile` through the wall at `datum`.
 """
 struct Cut <: AbstractOperation
     profile::Polygon
     datum::Datum
-    penetration::Union{ThroughAll,ThroughWall}
-
-    Cut(profile::Polygon, datum::Datum, penetration::Union{ThroughAll,ThroughWall}=ThroughAll()) =
-        new(profile, datum, penetration)
 end
 
 """
@@ -719,32 +714,20 @@ function drill(
 end
 
 """
-    cut(
-        part::RectangularTube,
-        profile::Polygon,
-        datum::Datum,
-        penetration::Union{ThroughAll,ThroughWall},
-    )
+    cut(part::RectangularTube, profile::Polygon, datum::Datum)
 
-Cut polygonal `profile` into `part` in the coordinate frame of `datum` with
-`penetration`. Validates that `datum` lies on a valid outer face of `part` and
-that every vertex of `profile` fits strictly within the inner cavity width and
-sawn tube ends.
+Cut polygonal `profile` through the wall of `part` at `datum`. Validates that
+`datum` lies on a valid outer face of `part` and that every vertex of `profile`
+fits strictly within the inner cavity width and sawn tube ends.
 """
 function cut(
     part::RectangularTube,
     profile::Polygon,
     datum::Datum,
-    penetration::Union{ThroughAll,ThroughWall},
 )
     face, _, _ = _match_face(part, datum)
     face_width = _face_width(part, face)
     T_face_datum = inv(face.transform) ∘ datum.transform
-    cross_depth = abs(dot(zaxis(face), SVector(part.width, part.height, part.length)))
-    z_depths =
-        penetration isa ThroughAll ?
-        (0.0, -part.thickness, -cross_depth + part.thickness, -cross_depth) :
-        (0.0, -part.thickness)
     for u in profile.points
         pf = T_face_datum(SVector(u[1], u[2], 0.0))
         (part.thickness < pf[1] && pf[1] < face_width - part.thickness) || throw(
@@ -752,7 +735,7 @@ function cut(
                 "Cutout vertex at local x=$(pf[1]) must fit strictly within inner cavity x ∈ ($(part.thickness), $(face_width - part.thickness))",
             ),
         )
-        for zd in z_depths
+        for zd in (0.0, -part.thickness)
             p3 = face.transform(SVector(pf[1], pf[2], zd))
             zb, zt = _tube_z_bounds(part, p3[1], p3[2])
             (zb < pf[2] && pf[2] < zt) || throw(
@@ -763,7 +746,7 @@ function cut(
         end
     end
 
-    op = Cut(profile, datum, penetration)
+    op = Cut(profile, datum)
     return _rebuild(part; parent=part, op=op)
 end
 
@@ -791,7 +774,7 @@ function cut(
         )
     end
 
-    op = Cut(profile, datum, ThroughAll())
+    op = Cut(profile, datum)
     return _rebuild(part; parent=part, op=op)
 end
 

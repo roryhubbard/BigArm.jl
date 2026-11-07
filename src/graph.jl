@@ -106,7 +106,7 @@ end
 function _op_label(op::Cut)
     p = origin(op.datum)
     position = "($(_fmt(p[1])), $(_fmt(p[2])), $(_fmt(p[3])))"
-    return "Cut($(_profile_label(op.profile)), $position, $(_pen_label(op.penetration)))"
+    return "Cut($(_profile_label(op.profile)), $position)"
 end
 
 _op_label(op::AbstractOperation) = string(nameof(typeof(op)))

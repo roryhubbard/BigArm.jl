@@ -185,17 +185,27 @@ end
             check_manifold_and_volume(m)
         end
 
-        # Polygonal Cut on RectangularTube (ThroughWall and ThroughAll)
-        tube_slot = cut(
+        # Polygonal Cut on RectangularTube (cuts the single datum wall; opposite wall requires a second Cut)
+        back = datum(blank, SVector(0, 1, 0))
+        tube_slot_1 = cut(
             blank,
             Rectangle(1.0, 2.0),
             Datum(front.transform ∘ Translation(1.5, 10.0, 0.0)),
-            ThroughAll(),
         )
-        m_slot = derive_mesh(tube_slot)
-        s_slot = check_manifold_and_volume(m_slot)
-        @test s_slot.euler == -4
-        @test (blank_stats.volume - s_slot.volume) ≈ 2.0 * (1.0 * 2.0) * 0.120 atol = 1e-9
+        m_slot_1 = derive_mesh(tube_slot_1)
+        s_slot_1 = check_manifold_and_volume(m_slot_1)
+        @test s_slot_1.euler == -2
+        @test (blank_stats.volume - s_slot_1.volume) ≈ (1.0 * 2.0) * 0.120 atol = 1e-9
+
+        tube_slot_2 = cut(
+            tube_slot_1,
+            Rectangle(1.0, 2.0),
+            Datum(back.transform ∘ Translation(1.5, 10.0, 0.0)),
+        )
+        m_slot_2 = derive_mesh(tube_slot_2)
+        s_slot_2 = check_manifold_and_volume(m_slot_2)
+        @test s_slot_2.euler == -4
+        @test (blank_stats.volume - s_slot_2.volume) ≈ 2.0 * (1.0 * 2.0) * 0.120 atol = 1e-9
     end
 
     @testset "2.5D slab generality and dispatch" begin
