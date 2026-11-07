@@ -74,7 +74,7 @@ cross-drilling operations.
 """
 function build_arm(spec::ArmSpec=ArmSpec())
     stick = RectangularTube(spec.width, spec.height, spec.stock_length, spec.thickness)
-    blank = saw(stick, spec.length)
+    blank = saw(stick, Datum(Translation(0.0, 0.0, spec.length)))
     front = datum(blank, SVector(0, -1, 0))
     hole = Circle(spec.hole_diameter)
     center_x = spec.width / 2.0
@@ -113,7 +113,7 @@ function build_ghd_assembly(;
     mount_z = lower_hole_z - plate_spec.upright_hole_ys[1]
     arm_top_z = mount_z + plate_spec.arm_hole_y + arm_spec.width / 2.0
 
-    t_upright = Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0))
+    t_upright = IdentityRigidTransform
     t_left_plate = Translation(0.0, 0.0, mount_z) ∘ LinearMap(RotX(π / 2))
     t_right_plate =
         Translation(0.0, upright_spec.height + plate_spec.thickness, mount_z) ∘

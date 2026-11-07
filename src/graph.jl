@@ -48,6 +48,12 @@ function _part_summary(part::RectangularTube)
     return "$kind RectangularTube\n$dims\nt=$(_fmt(part.thickness))"
 end
 
+function _part_summary(part::RoundTube)
+    kind = isstock(part) ? "stock" : "part"
+    dims = "$(_fmt(part.outer_diameter)) × $(_fmt(part.length))"
+    return "$kind RoundTube\n$dims\nt=$(_fmt(part.thickness))"
+end
+
 function _part_summary(part::Plate)
     kind = isstock(part) ? "stock" : "part"
     dims = "$(_fmt(part.width)) × $(_fmt(part.height))"
@@ -64,12 +70,43 @@ _pen_label(::ThroughWall) = "ThroughWall"
 _pen_label(penetration::Blind) = "Blind($(_fmt(penetration.depth)))"
 _pen_label(penetration::AbstractPenetration) = string(nameof(typeof(penetration)))
 
-_op_label(op::Saw) = "Saw($(_fmt(op.length)))"
+function _op_label(op::Saw)
+    p = origin(op.datum)
+    n = zaxis(op.datum)
+    position = "($(_fmt(p[1])), $(_fmt(p[2])), $(_fmt(p[3])))"
+    normal = "($(_fmt(n[1])), $(_fmt(n[2])), $(_fmt(n[3])))"
+    return "Saw($position, $normal)"
+end
 
 function _op_label(op::Drill)
     p = origin(op.datum)
     position = "($(_fmt(p[1])), $(_fmt(p[2])), $(_fmt(p[3])))"
     return "Drill(Circle($(_fmt(op.profile.diameter))), $position, $(_pen_label(op.penetration)))"
+end
+
+function _profile_label(profile::Polygon)
+    pts = profile.points
+    if length(pts) == 4
+        w = pts[2][1] - pts[1][1]
+        h = pts[3][2] - pts[2][2]
+        if w > 0.0 &&
+           h > 0.0 &&
+           pts == Point2d[
+               Point2d(-w / 2.0, -h / 2.0),
+               Point2d( w / 2.0, -h / 2.0),
+               Point2d( w / 2.0,  h / 2.0),
+               Point2d(-w / 2.0,  h / 2.0),
+           ]
+            return "Rectangle($(_fmt(w)), $(_fmt(h)))"
+        end
+    end
+    return "Polygon($(length(pts)))"
+end
+
+function _op_label(op::Cut)
+    p = origin(op.datum)
+    position = "($(_fmt(p[1])), $(_fmt(p[2])), $(_fmt(p[3])))"
+    return "Cut($(_profile_label(op.profile)), $position, $(_pen_label(op.penetration)))"
 end
 
 _op_label(op::AbstractOperation) = string(nameof(typeof(op)))

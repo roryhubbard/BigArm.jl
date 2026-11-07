@@ -31,7 +31,7 @@ and cross-drilling operations.
 """
 function build_upright(spec::UprightSpec=UprightSpec())
     stick = RectangularTube(spec.width, spec.height, spec.stock_length, spec.thickness)
-    blank = saw(stick, spec.length)
+    blank = saw(stick, Datum(Translation(0.0, 0.0, spec.length)))
 
     front = datum(blank, SVector(0, -1, 0))
     hole = Circle(spec.hole_diameter)

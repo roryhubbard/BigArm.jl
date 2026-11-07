@@ -29,7 +29,7 @@ end
     @test upright.length === 103.0
     @test upright.thickness === 0.120
     @test !isstock(upright)
-    @test length(holes(upright)) == spec.hole_count
+    @test length(operations_of_type(Drill, upright)) == spec.hole_count
 
     g = ManufacturingGraph(upright)
     @test length(g.nodes) == 2 + spec.hole_count
@@ -54,7 +54,7 @@ end
 
     dot = to_dot(g)
     @test startswith(dot, "digraph ManufacturingGraph {\n")
-    @test occursin("Saw(103.0)", dot)
+    @test occursin("Saw((0.0, 0.0, 103.0), (0.0, 0.0, 1.0))", dot)
     @test occursin("Drill(Circle(1.0), (1.5, 0.0, 2.0), ThroughAll)", dot)
     @test occursin("Drill(Circle(1.0), (1.5, 0.0, 100.0), ThroughAll)", dot)
 
@@ -79,7 +79,7 @@ end
     @test plate.height === 8.0
     @test plate.thickness === 0.1875
     @test !isstock(plate)
-    @test length(holes(plate)) == 4
+    @test length(operations_of_type(Drill, plate)) == 4
     @test length(ManufacturingGraph(plate).nodes) == 5
 
     plate_mesh = derive_mesh(plate)
@@ -87,7 +87,7 @@ end
     @test lo_p ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
     @test hi_p ≈ SVector(12.0, 8.0, 0.1875) atol = 1e-12
     plate_stats = check_manifold_and_volume(plate_mesh)
-    @test plate_stats.euler == 2 - 2 * length(holes(plate))
+    @test plate_stats.euler == 2 - 2 * length(operations_of_type(Drill, plate))
 
     @test arm isa RectangularTube
     @test arm.width === 3.0
@@ -95,7 +95,7 @@ end
     @test arm.length === 24.0
     @test arm.thickness === 0.120
     @test !isstock(arm)
-    @test length(holes(arm)) == 2
+    @test length(operations_of_type(Drill, arm)) == 2
     @test length(ManufacturingGraph(arm).nodes) == 4
 
     arm_mesh = derive_mesh(arm)
@@ -103,7 +103,7 @@ end
     @test lo_a ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
     @test hi_a ≈ SVector(3.0, 3.0, 24.0) atol = 1e-12
     arm_stats = check_manifold_and_volume(arm_mesh)
-    @test arm_stats.euler == -4 * length(holes(arm))
+    @test arm_stats.euler == -4 * length(operations_of_type(Drill, arm))
 
     mount_hole_index = 19
     asm = build_ghd_assembly(;
@@ -119,10 +119,10 @@ end
     right_plate_part, t_right = asm[3]
     arm_part, t_arm = asm[4]
 
-    upright_holes = holes(upright_part)
-    left_holes = holes(left_plate_part)
-    right_holes = holes(right_plate_part)
-    arm_holes = holes(arm_part)
+    upright_holes = operations_of_type(Drill, upright_part)
+    left_holes = operations_of_type(Drill, left_plate_part)
+    right_holes = operations_of_type(Drill, right_plate_part)
+    arm_holes = operations_of_type(Drill, arm_part)
 
     # Left and right plates align coaxially at all 4 holes
     for k in 1:4

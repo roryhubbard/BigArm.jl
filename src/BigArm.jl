@@ -6,7 +6,7 @@ using CoordinateTransformations: AffineMap, LinearMap, Translation
 using GeometryBasics: Mesh, Point2d, Point3d, TriangleFace, coordinates, faces
 using LinearAlgebra: dot, norm, normalize
 using MeshCat: MeshCat, MeshPhongMaterial, Visualizer, delete!, setobject!, setprop!, settransform!
-using Rotations: Rotation, RotX, RotZ
+using Rotations: Rotation, RotMatrix3, RotX, RotZ
 using StaticArrays: SVector
 using Triangulate: TriangulateIO, triangulate
 
@@ -17,15 +17,20 @@ export AbstractPart,
     AbstractPenetration,
     AbstractOperation,
     RigidTransform,
+    IdentityRigidTransform,
     RectangularTube,
+    RoundTube,
     Plate,
     Circle,
+    Polygon,
+    Rectangle,
     Datum,
     ThroughAll,
     ThroughWall,
     Blind,
     Saw,
     Drill,
+    Cut,
     Assembly,
     ManufacturingGraph,
     operation,
@@ -36,10 +41,11 @@ export AbstractPart,
     zaxis,
     datums,
     datum,
-    holes,
     saw,
     drill,
+    cut,
     operations,
+    operations_of_type,
     to_dot,
     derive_mesh,
     visualize
