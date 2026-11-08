@@ -361,3 +361,34 @@ function derive_mesh(part::Plate)
     )
     return Mesh(b.points, b.faces)
 end
+
+"""
+    derive_mesh(part::Weldment) -> GeometryBasics.Mesh
+
+Derive a 3D triangle mesh for `part` by transforming each welded component's
+mesh (`derive_mesh(subpart)`) into the weldment coordinate frame via its
+`RigidTransform`.
+"""
+function derive_mesh(part::Weldment)
+    pts = Point3d[]
+    fcs = TriangleFace{Int}[]
+    for (subpart, transform) in part.parts
+        submesh = derive_mesh(subpart)
+        offset = length(pts)
+        for p in coordinates(submesh)
+            tp = transform(SVector(p[1], p[2], p[3]))
+            push!(pts, Point3d(tp[1], tp[2], tp[3]))
+        end
+        for f in faces(submesh)
+            push!(
+                fcs,
+                TriangleFace{Int}(
+                    Int(f[1]) + offset,
+                    Int(f[2]) + offset,
+                    Int(f[3]) + offset,
+                ),
+            )
+        end
+    end
+    return Mesh(pts, fcs)
+end

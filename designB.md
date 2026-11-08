@@ -47,3 +47,12 @@ view the full assembly in MeshCat.
   in `test/ghd.jl` that all parts build, produce valid manufacturing DAGs and
   watertight meshes, and align coaxially at the upright pin holes and roller
   axles.
+
+### Phase 5: Weld joint datum / seam specification and contact validation
+
+- Extend `Weld` and `weld` in `src/primitives.jl` to carry explicit weld joint
+  `Datum` / seam parameters and validate that welded parts make physical contact
+  along the joint (rejecting floating or disjoint parts).
+- Surface weld joint locations and seam lengths in `ManufacturingGraph` /
+  `to_dot` in `src/graph.jl` and update the Design B weldment and tests in
+  `projects/ghd/` and `test/`.

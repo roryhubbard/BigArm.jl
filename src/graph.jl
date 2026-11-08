@@ -1,23 +1,17 @@
 """
     ManufacturingGraph(part::AbstractPart)
 
-Manufacturing history of `part`, from raw stock to `part`.
+Directed acyclic manufacturing graph of `part`, ordered topologically from raw
+stock roots to `part`.
 
-The history is a chain. Nodes are in that order, stock first. An edge is not
-stored: it is `parent(node) ──operation(node)──► node`.
+Each non-stock `node` has incoming edge(s) from `parent(node)` labeled with
+`operation(node)`.
 """
 struct ManufacturingGraph
     nodes::Vector{AbstractPart}
 
     function ManufacturingGraph(part::AbstractPart)
-        nodes = AbstractPart[]
-        curr = part
-        while !isnothing(curr)
-            push!(nodes, curr)
-            curr = parent(curr)
-        end
-        reverse!(nodes)
-        return new(nodes)
+        return new(_collect_nodes(part))
     end
 end
 
@@ -58,6 +52,10 @@ function _part_summary(part::Plate)
     kind = isstock(part) ? "stock" : "part"
     dims = "$(_fmt(part.width)) × $(_fmt(part.height))"
     return "$kind Plate\n$dims\nt=$(_fmt(part.thickness))"
+end
+
+function _part_summary(part::Weldment)
+    return "part Weldment\n$(length(part.parts)) parts"
 end
 
 function _part_summary(part::AbstractPart)
@@ -115,7 +113,7 @@ _op_label(op::AbstractOperation) = string(nameof(typeof(op)))
     to_dot(g::ManufacturingGraph) -> String
 
 Serialize `g` as a Graphviz DOT digraph. Nodes are stock/part summaries. Each
-non-stock node emits an edge `parent(node) → node`, labeled with
+non-stock node emits an edge `p → node` for each parent `p`, labeled with
 `operation(node)`. Node ids `n0`, `n1`, ... follow `g.nodes` order.
 """
 function to_dot(g::ManufacturingGraph)
@@ -130,7 +128,17 @@ function to_dot(g::ManufacturingGraph)
     for node in g.nodes
         isstock(node) && continue
         label = _dot_escape(_op_label(operation(node)))
-        push!(lines, "  n$(index[parent(node)]) -> n$(index[node]) [label=\"$label\"];")
+        ps = parent(node)
+        if ps isa AbstractVector
+            seen = IdSet{AbstractPart}()
+            for p in ps
+                p in seen && continue
+                push!(seen, p)
+                push!(lines, "  n$(index[p]) -> n$(index[node]) [label=\"$label\"];")
+            end
+        else
+            push!(lines, "  n$(index[ps]) -> n$(index[node]) [label=\"$label\"];")
+        end
     end
     push!(lines, "}")
     return join(lines, '\n') * '\n'

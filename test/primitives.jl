@@ -123,6 +123,22 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test origin(Datum(Translation(1.0, 2.0, 3.0))) ≈ SVector(1.0, 2.0, 3.0) atol = 1e-12
         @test zaxis(Datum(LinearMap(RotX(π / 2)))) ≈ SVector(0.0, -1.0, 0.0) atol = 1e-12
 
+        w = weld([
+            stick => IdentityRigidTransform,
+            plate => Translation(3.0, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
+        ])
+        @test w isa Weldment
+        @test w isa AbstractPart
+        @test !isstock(w)
+        @test operation(w) === Weld()
+        @test operation(w) isa Weld
+        @test operation(w) isa AbstractOperation
+        @test length(w) == 2
+        @test parent(w) == AbstractPart[stick, plate]
+        @test w[1].first === stick
+        @test w[2].first === plate
+        @test sprint(show, w) == "Weldment(2 parts)"
+
         asm = Assembly([
             stick => IdentityRigidTransform,
             plate => Translation(3.0, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
@@ -187,7 +203,19 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws DomainError Blind(0.0)
         @test_throws MethodError Saw(0.0)
 
-        @test_throws ArgumentError Assembly(Pair{<:AbstractPart,<:RigidTransform}[])
+        @test_throws ArgumentError Weldment(Pair{AbstractPart,RigidTransform}[])
+        @test_throws ArgumentError Weldment([plate => IdentityRigidTransform])
+        @test_throws ArgumentError weld([plate => IdentityRigidTransform])
+        @test_throws MethodError Weldment([
+            plate => IdentityRigidTransform,
+            stick => Translation(0.0, 0.0, 0.0) ∘ LinearMap([2.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]),
+        ])
+        @test_throws MethodError Weldment([
+            plate => IdentityRigidTransform,
+            stick => Translation(1.0, 2.0) ∘ LinearMap(RotX(0.0)),
+        ])
+
+        @test_throws ArgumentError Assembly(Pair{AbstractPart,RigidTransform}[])
         @test_throws MethodError Assembly([plate => Translation(0.0, 0.0, 0.0) ∘ LinearMap([2.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0])])
         @test_throws MethodError Assembly([plate => Translation(1.0, 2.0) ∘ LinearMap(RotX(0.0))])
     end
@@ -437,5 +465,11 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError cut(plate, SquareProfile(), dp)
         @test_throws MethodError cut(plate, Circle(1.0), dp)
         @test_throws MethodError cut(plate, Rectangle(1.0, 1.0), dp, ThroughAll())
+
+        w = weld([blank => IdentityRigidTransform, plate => IdentityRigidTransform])
+        @test_throws MethodError saw(w, Datum(Translation(0.0, 0.0, 10.0)))
+        @test_throws MethodError drill(w, Circle(1.0), dp, ThroughAll())
+        @test_throws MethodError cut(w, Rectangle(1.0, 1.0), dp)
+        @test_throws MethodError datums(w)
     end
 end

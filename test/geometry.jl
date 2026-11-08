@@ -390,6 +390,48 @@ end
         @test isapprox(stats_ma.volume, π * (0.5^2 - (0.5 - 0.120)^2) * 15.0; rtol=0.01)
     end
 
+    @testset "Weldment meshes" begin
+        base_plate = cut(
+            Plate(24.0, 14.0, 0.1875),
+            Rectangle(9.0, 8.5),
+            Datum(Translation(12.0, 7.0, 0.1875)),
+        )
+        ear = drill(
+            Plate(2.5, 8.5, 0.1875),
+            Circle(1.0),
+            Datum(Translation(1.5, 4.25, 0.1875)),
+            ThroughAll(),
+        )
+        axle = saw(RoundTube(1.0, 240.0, 0.120), Datum(Translation(0.0, 0.0, 20.0)))
+        weldment = weld([
+            base_plate => IdentityRigidTransform,
+            ear => Translation(7.5, 2.75, 0.1875) ∘ LinearMap(RotY(-π / 2)),
+            ear => Translation(16.5 + 0.1875, 2.75, 0.1875) ∘ LinearMap(RotY(-π / 2)),
+            axle => Translation(2.0, 7.0, 5.0) ∘ LinearMap(RotY(π / 2)),
+        ])
+
+        s_base = check_manifold_and_volume(derive_mesh(base_plate))
+        s_ear = check_manifold_and_volume(derive_mesh(ear))
+        s_axle = check_manifold_and_volume(derive_mesh(axle))
+
+        m_weld = derive_mesh(weldment)
+        @test m_weld isa Mesh
+        lo_w, hi_w = mesh_bbox(m_weld)
+        @test lo_w ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
+        @test hi_w ≈ SVector(24.0, 14.0, 5.5) atol = 1e-12
+
+        s_weld = check_manifold_and_volume(m_weld)
+        @test s_weld.nverts == s_base.nverts + 2 * s_ear.nverts + s_axle.nverts
+        @test s_weld.nfaces == s_base.nfaces + 2 * s_ear.nfaces + s_axle.nfaces
+        @test s_weld.euler == s_base.euler + 2 * s_ear.euler + s_axle.euler
+        @test s_weld.volume ≈ s_base.volume + 2 * s_ear.volume + s_axle.volume atol = 1e-9
+
+        # Every node in the weldment's DAG produces a valid watertight manifold mesh
+        for node in ManufacturingGraph(weldment).nodes
+            check_manifold_and_volume(derive_mesh(node))
+        end
+    end
+
     @testset "Geometry and graph visualization" begin
         vis = Visualizer()
         plate = cut(
@@ -403,7 +445,11 @@ end
             Datum(Translation(4.0, 2.0, 0.25)),
         )
         axle = saw(RoundTube(1.0, 240.0, 0.120), Datum(Translation(0.0, 0.0, 20.0)))
-        for p in (stick, blank, one_hole, multi_hole, plate, axle)
+        weldment = weld([
+            one_hole => IdentityRigidTransform,
+            plate => Translation(-1.5, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
+        ])
+        for p in (stick, blank, one_hole, multi_hole, plate, axle, weldment)
             returned = visualize(p; vis=vis, open_browser=false)
             @test returned === vis
         end

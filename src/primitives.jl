@@ -255,7 +255,7 @@ part's 3D origin):
 - `zaxis(datum)` is the outward surface normal (tools approach along `-zaxis(datum)`).
 """
 struct Datum <: AbstractDatum
-    transform::AffineMap{<:Rotation{3},<:SVector{3,Float64}}
+    transform::AffineMap{<:Rotation{3},SVector{3,Float64}}
 
     function Datum(transform::RigidTransform=IdentityRigidTransform)
         return new(IdentityRigidTransform ∘ transform)
@@ -382,21 +382,52 @@ struct Cut <: AbstractOperation
 end
 
 """
-    parent(part::AbstractPart) -> Union{Nothing,AbstractPart}
+    Weld()
 
-Return the part `part` was made from, or `nothing` for raw stock.
+Welding operation joining two or more parts into a rigid `Weldment`.
+"""
+struct Weld <: AbstractOperation end
 
-It is the single input of operations such as `saw`, `drill`, and `cut`.
+"""
+    Weldment(parts, op=Weld())
+
+Welded multi-part `AbstractPart` node joining two or more `AbstractPart`s in a
+shared right-handed 3D coordinate frame via `part => transform` pairs, where
+each `transform` is a `RigidTransform`.
+"""
+struct Weldment <: AbstractPart
+    parts::Vector{Pair{AbstractPart,RigidTransform}}
+    op::Weld
+
+    function Weldment(parts::AbstractVector{<:Pair}, op::Weld=Weld())
+        length(parts) >= 2 || throw(ArgumentError("Weldment must contain at least two parts"))
+        return new(Pair{AbstractPart,RigidTransform}[p.first => p.second for p in parts], op)
+    end
+end
+
+Base.length(weldment::Weldment) = length(weldment.parts)
+Base.iterate(weldment::Weldment, state...) = iterate(weldment.parts, state...)
+Base.getindex(weldment::Weldment, i::Integer) = weldment.parts[i]
+
+function Base.show(io::IO, weldment::Weldment)
+    print(io, "Weldment(", length(weldment.parts), " parts)")
+    return nothing
+end
+
+"""
+    parent(part::AbstractPart) -> Union{Nothing,AbstractPart,Vector{AbstractPart}}
+
+Return the part(s) `part` was made from: `nothing` for raw stock, the single
+input `AbstractPart` for operations such as `saw`, `drill`, and `cut`, or a
+`Vector{AbstractPart}` of welded components for a `Weldment`.
 """
 parent(part::AbstractPart) = part.parent
+parent(part::Weldment) = AbstractPart[p.first for p in part.parts]
 
 """
     operation(part::AbstractPart) -> Union{Nothing,AbstractOperation}
 
-Return the shop operation that produced `part` from `parent(part)`, or
-`nothing` for raw stock.
-
-`parent(part)` and `operation(part)` are either both `nothing` or both present.
+Return the shop operation that produced `part`, or `nothing` for raw stock.
 """
 operation(part::AbstractPart) = part.op
 
@@ -461,21 +492,37 @@ function _plane_z(datum::Datum, x::Real, y::Real)
     return p0[3] - (n[1] * (x - p0[1]) + n[2] * (y - p0[2])) / n[3]
 end
 
+function _collect_nodes(part::AbstractPart)
+    nodes = AbstractPart[]
+    visited = IdSet{AbstractPart}()
+    function visit(node::AbstractPart)
+        node in visited && return
+        push!(visited, node)
+        p = parent(node)
+        if p isa AbstractVector
+            foreach(visit, p)
+        elseif !isnothing(p)
+            visit(p)
+        end
+        push!(nodes, node)
+        return nothing
+    end
+    visit(part)
+    return nodes
+end
+
 """
     operations_of_type(::Type{T}, part::AbstractPart) where {T<:AbstractOperation} -> Vector{T}
 
-Collect all operations of type `T` in the ancestor chain of `part` in
-chronological order (from root stock to `part`).
+Collect all operations of type `T` in the manufacturing DAG of `part` in
+topological order (from root stock to `part`).
 """
 function operations_of_type(::Type{T}, part::AbstractPart) where {T<:AbstractOperation}
     result = T[]
-    curr = part
-    while !isnothing(curr)
-        op = operation(curr)
+    for node in _collect_nodes(part)
+        op = operation(node)
         op isa T && push!(result, op)
-        curr = parent(curr)
     end
-    reverse!(result)
     return result
 end
 
@@ -749,6 +796,14 @@ function cut(
 end
 
 """
+    weld(parts::AbstractVector{<:Pair}) -> Weldment
+
+Weld two or more `part => transform` pairs (`AbstractPart => RigidTransform`)
+into a rigid `Weldment`.
+"""
+weld(parts::AbstractVector{<:Pair}) = Weldment(parts)
+
+"""
     Assembly(parts)
 
 Multi-part 3D assembly positioning each `AbstractPart` in a shared right-handed
@@ -756,11 +811,11 @@ Multi-part 3D assembly positioning each `AbstractPart` in a shared right-handed
 `RigidTransform`.
 """
 struct Assembly
-    parts::Vector{Pair{<:AbstractPart,<:RigidTransform}}
+    parts::Vector{Pair{AbstractPart,RigidTransform}}
 
     function Assembly(parts::AbstractVector{<:Pair})
         isempty(parts) && throw(ArgumentError("Assembly must contain at least one part"))
-        return new(Pair{<:AbstractPart,<:RigidTransform}[p.first => p.second for p in parts])
+        return new(Pair{AbstractPart,RigidTransform}[p.first => p.second for p in parts])
     end
 end
 
