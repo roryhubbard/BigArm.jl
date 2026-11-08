@@ -40,8 +40,8 @@ view the full assembly in MeshCat.
 ### Phase 4: Welded Echo GHD attachment & assembly
 
 - Model the Design B welded attachment from `DIMENSIONS.md` in `projects/ghd/`:
-  - Welded steel frame (windowed footplate, 7-hole upright side ears, central
-    roller standoff web, and upper/lower axle shafts)
+  - Welded steel frame (windowed footplate, 4-hole upright side ears on 2″
+    centers, central roller standoff web, and upper/lower axle shafts)
   - Four cylindrical foam rollers mounted on the axles
 - Assemble the welded attachment and rollers onto the SM-2.5 upright and verify
   in `test/ghd.jl` that all parts build, produce valid manufacturing DAGs and

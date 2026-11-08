@@ -34,7 +34,7 @@ Sources: Rogue Echo GHD product page, Rogue `IS0183` customer instruction sheet 
 | **Side mounting ears** (`2×`) | `3/16 in` (`0.1875 in`) laser-cut steel | **Published** (Rogue spec) |
 | Side ear outer dimensions | `2.5 in` deep × `8.5 in` tall | **Photo-estimated** (`Echo GHD 3.png`) |
 | Side ear inside spacing | `3.0 in` (straddles `3×3 in` upright) | **Published** (`3×3` compatibility) |
-| Side ear hole pattern | `7` holes, `1.0 in` on-center vertical spacing (`y = 1.25:1.0:7.25 in`), `x = 1.5 in` from upright front face | **Photo-estimated** (`Echo GHD 3.png`: 3 holes above pin + 1 pinned + 3 below = 7 holes; 1 in ear spacing against 2 in upright spacing gives 1 in height increments) |
+| Side ear hole pattern | `7` holes on `1.0 in` centers (`5/8 in` stock Monster Lite); adapted to **`4` holes on `2.0 in` vertical centers** (`y = 1.25:2.0:7.25 in`, `x = 1.5 in` from upright front face) for `1.0 in` SM-2.5 Monster holes | **Photo-estimated** (`Echo GHD 3.png`) / **Inference** (`2.0 in` spacing required so `1.0 in` holes have `1.0 in` web instead of touching) |
 | Detent pin diameter | `5/8 in` (`0.625 in`) on stock Monster Lite; **`1.0 in`** for SM-2.5 Monster adaptation | **Published** (`IS0183`: `5/8" × 4" Detent Pin`) / **Inference** (`1.0"` for SM-2.5) |
 | **Footplate** (`1×`) | `3/16 in` (`0.1875 in`) steel plate | **Published** (Rogue spec) |
 | Footplate outer dimensions | `24.0 in` wide × `14.0 in` tall | **Photo-estimated** (`Echo GHD 2.png`–`4.png`: ~7 upright hole spaces tall, matches 24 in pad width) |
@@ -121,7 +121,7 @@ Models the exact factory Echo GHD geometry shown in `Echo GHD 2.png`–`4.png`, 
    - Cut with a centered `Rectangle(9.0, 8.5)` through-window at `(x = 12.0, y = 7.0)`.
    - Oriented vertically at `X ∈ [3.0, 3.1875]`, centered on the upright (`Y ∈ [-10.5, 13.5]`, `Z ∈ [mount_z, mount_z + 14.0]`).
 2. **Left & Right Upright Side Ears (`2 × Plate(2.5, 8.5, 0.1875)`)**:
-   - Each drilled with `7` holes (`Circle(1.0)`) on `1.0 in` vertical centers at `x = 1.5 in`, `y = 1.25:1.0:7.25 in`.
+   - Each drilled with `4` holes (`Circle(1.0)`) on `2.0 in` vertical centers at `x = 1.5 in`, `y = 1.25:2.0:7.25 in`.
    - Welded to the back of the Footplate at `Y ∈ [-0.1875, 0.0]` and `Y ∈ [3.0, 3.1875]`, spanning `X ∈ [0.5, 3.0]` and `Z ∈ [mount_z + 2.75, mount_z + 11.25]`.
 3. **Central Roller Standoff Web (`Plate(6.0, 10.5, 0.1875)`)**:
    - Drilled with `2` axle holes (`Circle(1.0)`) at `x = 5.0 in`, `y = 1.0 in` (lower) and `y = 9.5 in` (upper).
