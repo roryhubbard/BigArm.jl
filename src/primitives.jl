@@ -165,8 +165,7 @@ end
 """
     LineSegment(length)
 
-Linear 1D seam profile of positive `length` (inches, `Float64`) running from
-`(0, 0)` to `(length, 0)` along `+xaxis` of a `Datum`.
+Linear 1D profile with positive `length` (inches, `Float64`).
 """
 struct LineSegment <: AbstractProfile
     length::Float64
