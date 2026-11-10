@@ -1,30 +1,3 @@
-const _CIRCLE_SEGMENTS = 32
-
-function _rect_loop(x0::Real, y0::Real, x1::Real, y1::Real)
-    return Point2d[
-        Point2d(Float64(x0), Float64(y0)),
-        Point2d(Float64(x1), Float64(y0)),
-        Point2d(Float64(x1), Float64(y1)),
-        Point2d(Float64(x0), Float64(y1)),
-    ]
-end
-
-"""
-    _contour(profile::AbstractProfile) -> Vector{Point2d}
-
-Return a counter-clockwise 2D polygon loop approximating `profile` in its local
-datum XY plane.
-"""
-function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
-    r = profile.diameter / 2.0
-    return Point2d[
-        Point2d(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
-        for i in 1:segments
-    ]
-end
-
-_contour(profile::Polygon) = profile.points
-
 function _project_2d(T, u::Point2d)
     p = T(SVector(u[1], u[2], 0.0))
     return Point2d(p[1], p[2])
@@ -36,13 +9,6 @@ function _project_hole(op::Union{Drill,Cut}, onto::Datum)
     _is_ccw(_to_geos_polygon(loop)) || reverse!(loop)
     return loop
 end
-
-function _pierces_face(op::Drill, face::Datum)
-    d = dot(zaxis(op.datum), zaxis(face))
-    return d > 1.0 - _ATOL || (op.penetration isa ThroughAll && d < -1.0 + _ATOL)
-end
-
-_pierces_face(op::Cut, face::Datum) = dot(zaxis(op.datum), zaxis(face)) > 1.0 - _ATOL
 
 function _face_holes(
     part::AbstractPart,
@@ -365,14 +331,18 @@ end
 """
     derive_mesh(part::Weldment) -> GeometryBasics.Mesh
 
-Derive a 3D triangle mesh for `part` by transforming each welded component's
-mesh (`derive_mesh(subpart)`) into the weldment coordinate frame via its
-`RigidTransform`.
+Derive a 3D triangle mesh for `part` by combining `derive_mesh(part.parent[1])`
+in `part`'s coordinate frame with `derive_mesh(part.parent[2])` transformed by
+`_weld_transform(part.op)`.
 """
 function derive_mesh(part::Weldment)
     pts = Point3d[]
     fcs = TriangleFace{Int}[]
-    for (subpart, transform) in part.parts
+    T_b = _weld_transform(part.op)
+    for (subpart, transform) in (
+        part.parent[1] => IdentityRigidTransform,
+        part.parent[2] => T_b,
+    )
         submesh = derive_mesh(subpart)
         offset = length(pts)
         for p in coordinates(submesh)

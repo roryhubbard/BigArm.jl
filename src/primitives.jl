@@ -163,6 +163,22 @@ struct Plate <: AbstractPart
 end
 
 """
+    LineSegment(length)
+
+Linear 1D seam profile of positive `length` (inches, `Float64`) running from
+`(0, 0)` to `(length, 0)` along `+xaxis` of a `Datum`.
+"""
+struct LineSegment <: AbstractProfile
+    length::Float64
+
+    function LineSegment(length::Real)
+        l = Float64(length)
+        l > 0.0 || throw(DomainError(length, "LineSegment length must be positive"))
+        return new(l)
+    end
+end
+
+"""
     Circle(diameter)
 
 Circular 2D cut profile with positive `diameter` (inches, `Float64`).
@@ -178,6 +194,16 @@ struct Circle <: AbstractProfile
 end
 
 const _ATOL = 1e-9
+const _CIRCLE_SEGMENTS = 32
+
+function _rect_loop(x0::Real, y0::Real, x1::Real, y1::Real)
+    return Point2d[
+        Point2d(Float64(x0), Float64(y0)),
+        Point2d(Float64(x1), Float64(y0)),
+        Point2d(Float64(x1), Float64(y1)),
+        Point2d(Float64(x0), Float64(y1)),
+    ]
+end
 
 function _to_geos_polygon(loop::AbstractVector{Point2d})
     coords = Vector{Float64}[[p[1], p[2]] for p in loop]
@@ -236,6 +262,22 @@ function Rectangle(width::Real, height::Real)
         Point2d(-hw,  hh),
     ])
 end
+
+"""
+    _contour(profile::AbstractProfile) -> Vector{Point2d}
+
+Return a counter-clockwise 2D polygon loop approximating `profile` in its local
+datum XY plane.
+"""
+function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
+    r = profile.diameter / 2.0
+    return Point2d[
+        Point2d(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
+        for i in 1:segments
+    ]
+end
+
+_contour(profile::Polygon) = profile.points
 
 const RigidTransform = Union{
     AffineMap{<:Rotation{3},<:SVector{3,<:Real}},
@@ -382,47 +424,36 @@ struct Cut <: AbstractOperation
 end
 
 """
-    Weld()
+    Weld(datum_a::Datum, datum_b::Datum, profile::AbstractProfile)
 
-Welding operation joining two or more parts into a rigid `Weldment`.
+Welding operation joining `part_b` (at `datum_b`) to `part_a` (at `datum_a`)
+along `profile`.
 """
-struct Weld <: AbstractOperation end
+struct Weld <: AbstractOperation
+    datum_a::Datum
+    datum_b::Datum
+    profile::AbstractProfile
+end
 
 """
-    Weldment(parts, op=Weld())
+    Weldment(parent::Pair{<:AbstractPart,<:AbstractPart}, op::Weld)
 
-Welded multi-part `AbstractPart` node joining two or more `AbstractPart`s in a
-shared right-handed 3D coordinate frame via `part => transform` pairs, where
-each `transform` is a `RigidTransform`.
+Welded `AbstractPart` node produced from two input parts `parent` (`part_a => part_b`)
+by `op::Weld`.
 """
 struct Weldment <: AbstractPart
-    parts::Vector{Pair{AbstractPart,RigidTransform}}
+    parent::Pair{AbstractPart,AbstractPart}
     op::Weld
-
-    function Weldment(parts::AbstractVector{<:Pair}, op::Weld=Weld())
-        length(parts) >= 2 || throw(ArgumentError("Weldment must contain at least two parts"))
-        return new(Pair{AbstractPart,RigidTransform}[p.first => p.second for p in parts], op)
-    end
-end
-
-Base.length(weldment::Weldment) = length(weldment.parts)
-Base.iterate(weldment::Weldment, state...) = iterate(weldment.parts, state...)
-Base.getindex(weldment::Weldment, i::Integer) = weldment.parts[i]
-
-function Base.show(io::IO, weldment::Weldment)
-    print(io, "Weldment(", length(weldment.parts), " parts)")
-    return nothing
 end
 
 """
-    parent(part::AbstractPart) -> Union{Nothing,AbstractPart,Vector{AbstractPart}}
+    parent(part::AbstractPart) -> Union{Nothing,AbstractPart,Pair{AbstractPart,AbstractPart}}
 
 Return the part(s) `part` was made from: `nothing` for raw stock, the single
-input `AbstractPart` for operations such as `saw`, `drill`, and `cut`, or a
-`Vector{AbstractPart}` of welded components for a `Weldment`.
+input `AbstractPart` for operations such as `saw`, `drill`, and `cut`, or the
+`Pair{AbstractPart,AbstractPart}` of input parts for a `Weldment`.
 """
 parent(part::AbstractPart) = part.parent
-parent(part::Weldment) = AbstractPart[p.first for p in part.parts]
 
 """
     operation(part::AbstractPart) -> Union{Nothing,AbstractOperation}
@@ -486,12 +517,14 @@ function _root_stock(part::AbstractPart)
     return curr
 end
 
+# Evaluate the Z height where `datum`'s XY plane intersects the vertical line at (x, y).
 function _plane_z(datum::Datum, x::Real, y::Real)
     p0 = origin(datum)
     n = zaxis(datum)
     return p0[3] - (n[1] * (x - p0[1]) + n[2] * (y - p0[2])) / n[3]
 end
 
+# Post-order DFS over `parent(node)` collecting all unique ancestor parts in topological order.
 function _collect_nodes(part::AbstractPart)
     nodes = AbstractPart[]
     visited = IdSet{AbstractPart}()
@@ -499,7 +532,7 @@ function _collect_nodes(part::AbstractPart)
         node in visited && return
         push!(visited, node)
         p = parent(node)
-        if p isa AbstractVector
+        if p isa Pair
             foreach(visit, p)
         elseif !isnothing(p)
             visit(p)
@@ -526,6 +559,8 @@ function operations_of_type(::Type{T}, part::AbstractPart) where {T<:AbstractOpe
     return result
 end
 
+# Compute the active (z_bottom, z_top) axial bounds of `part` along the vertical line (x, y)
+# after applying all `Saw` operations in its history (each keeping the `-zaxis` half-space).
 function _tube_z_bounds(part::AbstractTube, x::Real, y::Real)
     root = _root_stock(part)
     zb = 0.0
@@ -556,6 +591,8 @@ function _cross_section_points(part::RoundTube)
     ]
 end
 
+# Build a large 2D bounding polygon representing the kept half-plane `{q : dot(q - p0, n) <= 0}`
+# so that `LibGEOS.intersection(poly, halfplane)` clips `poly` against the saw line.
 function _halfplane_polygon(
     poly::LibGEOS.Polygon,
     p0::SVector{3,Float64},
@@ -575,6 +612,8 @@ function _halfplane_polygon(
     ])
 end
 
+# Replay all `Saw` cuts on `part` starting from the root rectangular stock to obtain
+# the current outer 2D polygon of the plate.
 function _plate_polygon(part::Plate)
     root = _root_stock(part)
     poly = _to_geos_polygon(Point2d[
@@ -795,13 +834,196 @@ function cut(
     return _rebuild(part; parent=part, op=op)
 end
 
-"""
-    weld(parts::AbstractVector{<:Pair}) -> Weldment
+function _pierces_face(op::Drill, face::Datum)
+    d = dot(zaxis(op.datum), zaxis(face))
+    return d > 1.0 - _ATOL || (op.penetration isa ThroughAll && d < -1.0 + _ATOL)
+end
 
-Weld two or more `part => transform` pairs (`AbstractPart => RigidTransform`)
-into a rigid `Weldment`.
+_pierces_face(op::Cut, face::Datum) = dot(zaxis(op.datum), zaxis(face)) > 1.0 - _ATOL
+
+# Return the 3D vertices of a weld seam `profile` transformed by `T`:
+# - For `LineSegment(L)`, the two endpoints `(0, 0, 0)` and `(L, 0, 0)` along `+xaxis`.
+# - For `Circle(d)`, the closed 32-segment contour loop in the datum XY plane.
+function _seam_3d_points(profile::LineSegment, T)
+    return SVector{3,Float64}[
+        T(SVector(0.0, 0.0, 0.0)),
+        T(SVector(profile.length, 0.0, 0.0)),
+    ]
+end
+
+function _seam_3d_points(profile::Circle, T)
+    pts = SVector{3,Float64}[T(SVector(u[1], u[2], 0.0)) for u in _contour(profile)]
+    # Repeat the first vertex at the end so `LibGEOS.LineString` includes the closing segment `pts[end] -> pts[1]`.
+    push!(pts, pts[1])
+    return pts
+end
+
+# Project 3D seam vertices `pts` onto the XY plane as a `LibGEOS.LineString`
+# (or a `LibGEOS.Point` when the seam runs purely along the Z axis).
+function _seam_2d_geom(pts::AbstractVector{SVector{3,Float64}})
+    if all(p -> hypot(p[1] - pts[1][1], p[2] - pts[1][2]) <= _ATOL, pts)
+        return LibGEOS.Point(pts[1][1], pts[1][2])
+    end
+    return LibGEOS.LineString(Vector{Float64}[[p[1], p[2]] for p in pts])
+end
+
+# Validate that `profile` (transformed into `part`'s local frame by `T_local`) lies on the
+# surface of `part::Plate` using `LibGEOS`: subtract all active hole/cutout polygons from
+# `_plate_polygon(part)` via `LibGEOS.difference`, then check `LibGEOS.covers` against the
+# perforated face polygon (for top/bottom face seams) or its `LibGEOS.boundary` (for edge/hole seams).
+function _seam_on_subpart(part::Plate, T_local, profile::Union{LineSegment,Circle})
+    pts = _seam_3d_points(profile, T_local)
+    t = part.thickness
+    all(p -> -_ATOL <= p[3] <= t + _ATOL, pts) || return false
+
+    poly = _plate_polygon(part)
+    for op in operations_of_type(Union{Drill,Cut}, part)
+        if op isa Drill && op.penetration isa Blind
+            in_depth =
+                zaxis(op.datum)[3] > 0.0 ?
+                any(p -> p[3] >= t - op.penetration.depth - _ATOL, pts) :
+                any(p -> p[3] <= op.penetration.depth + _ATOL, pts)
+            in_depth || continue
+        end
+        hole = _to_geos_polygon(Point2d[
+            Point2d(op.datum.transform(SVector(u[1], u[2], 0.0))[1:2])
+            for u in _contour(op.profile)
+        ])
+        poly = LibGEOS.difference(poly, hole)
+    end
+
+    on_flat_face = all(p -> abs(p[3]) <= _ATOL, pts) || all(p -> abs(p[3] - t) <= _ATOL, pts)
+    target = on_flat_face ? poly : LibGEOS.boundary(poly)
+    return LibGEOS.covers(LibGEOS.buffer(target, _ATOL), _seam_2d_geom(pts))
+end
+
+# Validate that `profile` lies on the surface of `part::RoundTube` by constructing the
+# annular cross-section via `LibGEOS.difference(outer_circle, inner_circle)` and checking
+# `LibGEOS.covers` against the annulus (for sawn end caps) or its `LibGEOS.boundary` (for cylindrical walls).
+function _seam_on_subpart(part::RoundTube, T_local, profile::Union{LineSegment,Circle})
+    pts = _seam_3d_points(profile, T_local)
+    for p in pts
+        zb, zt = _tube_z_bounds(part, p[1], p[2])
+        (zb - _ATOL <= p[3] <= zt + _ATOL) || return false
+    end
+
+    outer = _to_geos_polygon(_contour(Circle(part.outer_diameter)))
+    inner = _to_geos_polygon(_contour(Circle(part.outer_diameter - 2.0 * part.thickness)))
+    annulus = LibGEOS.difference(outer, inner)
+    on_end_cap =
+        all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[1]) <= _ATOL, pts) ||
+        all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[2]) <= _ATOL, pts)
+    target = on_end_cap ? annulus : LibGEOS.boundary(annulus)
+    return LibGEOS.covers(LibGEOS.buffer(target, _ATOL), _seam_2d_geom(pts))
+end
+
+# Validate that `profile` lies on the surface of `part::RectangularTube` by checking
+# either the top/bottom sawn annular end caps or any of the 4 perforated tube walls via `LibGEOS`.
+function _seam_on_subpart(part::RectangularTube, T_local, profile::Union{LineSegment,Circle})
+    pts = _seam_3d_points(profile, T_local)
+    w = part.width
+    h = part.height
+    t = part.thickness
+    for p in pts
+        zb, zt = _tube_z_bounds(part, p[1], p[2])
+        (zb - _ATOL <= p[3] <= zt + _ATOL) || return false
+    end
+
+    # 1. Check top/bottom sawn annular end caps in XY.
+    on_end_cap =
+        all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[1]) <= _ATOL, pts) ||
+        all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[2]) <= _ATOL, pts)
+    if on_end_cap
+        annulus = LibGEOS.difference(
+            _to_geos_polygon(_rect_loop(0.0, 0.0, w, h)),
+            _to_geos_polygon(_rect_loop(t, t, w - t, h - t)),
+        )
+        LibGEOS.covers(LibGEOS.buffer(annulus, _ATOL), _seam_2d_geom(pts)) && return true
+    end
+
+    # 2. Check each of the 4 tube walls in its local face coordinate frame.
+    for face in datums(part)
+        fpts = SVector{3,Float64}[inv(face.transform)(p) for p in pts]
+        all(fp -> -t - _ATOL <= fp[3] <= _ATOL, fpts) || continue
+
+        fw = _face_width(part, face)
+        p0 = face.transform(SVector(0.0, 0.0, 0.0))
+        pw = face.transform(SVector(fw, 0.0, 0.0))
+        zb0, zt0 = _tube_z_bounds(part, p0[1], p0[2])
+        zbw, ztw = _tube_z_bounds(part, pw[1], pw[2])
+        wall_poly = _to_geos_polygon(Point2d[
+            Point2d(0.0, zb0),
+            Point2d(fw, zbw),
+            Point2d(fw, ztw),
+            Point2d(0.0, zt0),
+        ])
+        for op in operations_of_type(Union{Drill,Cut}, part)
+            _pierces_face(op, face) || continue
+            T_face_op = inv(face.transform) ∘ op.datum.transform
+            hole = _to_geos_polygon(Point2d[
+                Point2d(T_face_op(SVector(u[1], u[2], 0.0))[1:2])
+                for u in _contour(op.profile)
+            ])
+            wall_poly = LibGEOS.difference(wall_poly, hole)
+        end
+
+        on_wall_face = all(fp -> abs(fp[3]) <= _ATOL, fpts) || all(fp -> abs(fp[3] + t) <= _ATOL, fpts)
+        target = on_wall_face ? wall_poly : LibGEOS.boundary(wall_poly)
+        LibGEOS.covers(LibGEOS.buffer(target, _ATOL), _seam_2d_geom(fpts)) && return true
+    end
+    return false
+end
+
+# Relative rigid transform placing `part_b` into `part_a`'s frame by gluing `datum_b` onto `datum_a`.
+_weld_transform(op::Weld) = op.datum_a.transform ∘ inv(op.datum_b.transform)
+
+# Check whether `profile` in `datum`'s frame lies on the surface of `part`
+# (or recursively on either branch of `part` when `part` is a `Weldment`).
+_seam_on_part(part::AbstractPart, datum::Datum, profile::Union{LineSegment,Circle}) =
+    _seam_on_subpart(part, datum.transform, profile)
+
+function _seam_on_part(part::Weldment, datum::Datum, profile::Union{LineSegment,Circle})
+    T_b = _weld_transform(part.op)
+    return _seam_on_part(part.parent[1], datum, profile) ||
+           _seam_on_part(part.parent[2], Datum(inv(T_b) ∘ datum.transform), profile)
+end
+
 """
-weld(parts::AbstractVector{<:Pair}) = Weldment(parts)
+    weld(
+        part_a::AbstractPart,
+        datum_a::Datum,
+        part_b::AbstractPart,
+        datum_b::Datum,
+        profile::Union{LineSegment,Circle},
+    ) -> Weldment
+
+Weld `part_b` (at `datum_b` in `part_b`'s frame) onto `part_a` (at `datum_a` in
+`part_a`'s frame) along `profile` (a `LineSegment` along `+xaxis` or a `Circle`
+in the datum XY plane).
+
+Validates that `profile` lies on the surface of both `part_a` (at `datum_a`) and
+`part_b` (at `datum_b`).
+"""
+function weld(
+    part_a::AbstractPart,
+    datum_a::Datum,
+    part_b::AbstractPart,
+    datum_b::Datum,
+    profile::Union{LineSegment,Circle},
+)
+    op = Weld(datum_a, datum_b, profile)
+    _seam_on_part(part_a, datum_a, profile) || throw(
+        ArgumentError(
+            "Weld seam at $(origin(datum_a)) does not lie on the surface of first part ($(typeof(part_a)))",
+        ),
+    )
+    _seam_on_part(part_b, datum_b, profile) || throw(
+        ArgumentError(
+            "Weld seam at $(origin(datum_b)) does not lie on the surface of second part ($(typeof(part_b)))",
+        ),
+    )
+    return Weldment(part_a => part_b, op)
+end
 
 """
     Assembly(parts)

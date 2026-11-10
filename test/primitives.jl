@@ -23,6 +23,11 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test length(datums(stick)) == 4
         @test isempty(operations(stick))
 
+        l = LineSegment(4)
+        @test l isa LineSegment
+        @test l isa AbstractProfile
+        @test l.length === 4.0
+
         c = Circle(1)
         @test c isa Circle
         @test c isa AbstractProfile
@@ -123,21 +128,16 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test origin(Datum(Translation(1.0, 2.0, 3.0))) ≈ SVector(1.0, 2.0, 3.0) atol = 1e-12
         @test zaxis(Datum(LinearMap(RotX(π / 2)))) ≈ SVector(0.0, -1.0, 0.0) atol = 1e-12
 
-        w = weld([
-            stick => IdentityRigidTransform,
-            plate => Translation(3.0, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
-        ])
+        d_stick_weld = Datum(Translation(3.0, 0.0, 10.0) ∘ LinearMap(RotY(-π / 2)))
+        d_plate_weld = Datum(LinearMap(RotZ(π / 2)))
+        w = weld(stick, d_stick_weld, plate, d_plate_weld, LineSegment(4.0))
         @test w isa Weldment
         @test w isa AbstractPart
         @test !isstock(w)
-        @test operation(w) === Weld()
+        @test operation(w) === Weld(d_stick_weld, d_plate_weld, LineSegment(4.0))
         @test operation(w) isa Weld
         @test operation(w) isa AbstractOperation
-        @test length(w) == 2
-        @test parent(w) == AbstractPart[stick, plate]
-        @test w[1].first === stick
-        @test w[2].first === plate
-        @test sprint(show, w) == "Weldment(2 parts)"
+        @test parent(w) == (stick => plate)
 
         asm = Assembly([
             stick => IdentityRigidTransform,
@@ -188,6 +188,8 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws ArgumentError Plate(6.0, 4.0, 0.25, plate, nothing)
         @test_throws ArgumentError Plate(6.0, 4.0, 0.25, nothing, saw_20)
 
+        @test_throws DomainError LineSegment(0.0)
+        @test_throws DomainError LineSegment(-1.0)
         @test_throws DomainError Circle(0.0)
         @test_throws DomainError Circle(-1.0)
         @test_throws DomainError Rectangle(0.0, 4.0)
@@ -203,17 +205,10 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws DomainError Blind(0.0)
         @test_throws MethodError Saw(0.0)
 
-        @test_throws ArgumentError Weldment(Pair{AbstractPart,RigidTransform}[])
-        @test_throws ArgumentError Weldment([plate => IdentityRigidTransform])
-        @test_throws ArgumentError weld([plate => IdentityRigidTransform])
-        @test_throws MethodError Weldment([
-            plate => IdentityRigidTransform,
-            stick => Translation(0.0, 0.0, 0.0) ∘ LinearMap([2.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]),
-        ])
-        @test_throws MethodError Weldment([
-            plate => IdentityRigidTransform,
-            stick => Translation(1.0, 2.0) ∘ LinearMap(RotX(0.0)),
-        ])
+        w_op = Weld(Datum(), Datum(), LineSegment(1.0))
+        @test_throws MethodError Weldment(AbstractPart[], w_op)
+        @test_throws MethodError Weldment(plate, w_op)
+        @test_throws MethodError Weldment(plate => 1.0, w_op)
 
         @test_throws ArgumentError Assembly(Pair{AbstractPart,RigidTransform}[])
         @test_throws MethodError Assembly([plate => Translation(0.0, 0.0, 0.0) ∘ LinearMap([2.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0])])
@@ -433,6 +428,32 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         # Blind hole depth >= plate thickness fails
         @test_throws ArgumentError drill(plate, Circle(1.0), at(top, 3.0, 2.0), Blind(0.25))
         @test_throws ArgumentError drill(plate, Circle(1.0), at(top, 3.0, 2.0), Blind(0.5))
+
+        # Invalid welds: floating datums, seams exceeding part dimensions, or mismatched hole/tube circles
+        ear = Plate(2.5, 8.5, 0.1875)
+        d_ear = Datum(LinearMap(RotZ(π / 2)))
+        d_plate_ok = Datum(Translation(2.0, 0.0, 0.0) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2)))
+        # Seam length 8.5 exceeds plate height 4.0 on first part
+        @test_throws ArgumentError weld(plate, d_plate_ok, ear, d_ear, LineSegment(8.5))
+        # Seam length 9.0 exceeds ear height 8.5 on second part
+        fp = Plate(24.0, 14.0, 0.1875)
+        d_fp_ok = Datum(Translation(10.0, 2.75, 0.0) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2)))
+        @test_throws ArgumentError weld(fp, d_fp_ok, ear, d_ear, LineSegment(9.0))
+        # Floating datum off first or second part surface
+        d_fp_float = Datum(Translation(10.0, 2.75, 0.5) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2)))
+        d_ear_float = Datum(Translation(-0.1, 0.0, 0.0) ∘ LinearMap(RotZ(π / 2)))
+        @test_throws ArgumentError weld(fp, d_fp_float, ear, d_ear, LineSegment(8.5))
+        @test_throws ArgumentError weld(fp, d_fp_ok, ear, d_ear_float, LineSegment(8.5))
+        # Seam passing through an open cutout window on first part fails
+        fp_win = cut(fp, Rectangle(9.0, 8.5), Datum(Translation(12.0, 7.0, 0.1875)))
+        d_fp_in_window = Datum(Translation(12.0, 4.0, 0.0) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2)))
+        @test_throws ArgumentError weld(fp_win, d_fp_in_window, ear, d_ear, LineSegment(4.0))
+        # Circular weld with wrong diameter or outside tube length fails
+        drilled_plate = drill(plate, Circle(1.0), at(top, 3.0, 2.0), ThroughAll())
+        d_hole = at(top, 3.0, 2.0)
+        d_tube = Datum(Translation(0.0, 0.0, 10.0))
+        @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, d_tube, Circle(1.5))
+        @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, Datum(Translation(0.0, 0.0, 25.0)), Circle(1.0))
     end
 
     @testset "Dispatch enforcement" begin
@@ -466,10 +487,16 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError cut(plate, Circle(1.0), dp)
         @test_throws MethodError cut(plate, Rectangle(1.0, 1.0), dp, ThroughAll())
 
-        w = weld([blank => IdentityRigidTransform, plate => IdentityRigidTransform])
+        w = weld(blank, Datum(Translation(0.0, 0.0, 10.0)), plate, Datum(), LineSegment(3.0))
         @test_throws MethodError saw(w, Datum(Translation(0.0, 0.0, 10.0)))
         @test_throws MethodError drill(w, Circle(1.0), dp, ThroughAll())
         @test_throws MethodError cut(w, Rectangle(1.0, 1.0), dp)
         @test_throws MethodError datums(w)
+        # Weld constructor accepts any AbstractProfile, while weld() only dispatches on Line and Circle
+        @test Weld(Datum(), Datum(), SquareProfile()) isa Weld
+        @test Weld(Datum(), Datum(), Rectangle(1.0, 1.0)) isa Weld
+        @test_throws MethodError weld(plate, Datum(), blank, Datum(), SquareProfile())
+        @test_throws MethodError weld(plate, Datum(), blank, Datum(), Rectangle(1.0, 1.0))
+        @test_throws MethodError weld(plate, Datum(), blank, Datum(), 3.0)
     end
 end

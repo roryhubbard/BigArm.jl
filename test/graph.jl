@@ -258,22 +258,34 @@ end
         ], '\n') * '\n'
         @test to_dot(fp_g) == expected_fp_dot
 
-        # Multi-parent DAG for a Weldment (joining plate, round tube, and nested/shared nodes)
-        weldment = weld([
-            fp_cut => IdentityRigidTransform,
-            plate_h2 => Translation(0.0, 0.0, 0.1875),
-            axle => Translation(0.0, 0.0, 5.0),
-        ])
+        # Multi-parent DAG for a Weldment (linear and circular welds)
+        w1 = weld(
+            fp_cut,
+            Datum(Translation(4.0, 2.0, 0.0)),
+            plate_h2,
+            Datum(),
+            LineSegment(8.0),
+        )
+        T_plate_h2 = BigArm._weld_transform(operation(w1))
+        d_hole_in_w1 = Datum(T_plate_h2 ∘ place(top, 2.0, 2.0).transform)
+        weldment = weld(
+            w1,
+            d_hole_in_w1,
+            axle,
+            Datum(Translation(0.0, 0.0, 10.0)),
+            Circle(1.0),
+        )
         weld_g = ManufacturingGraph(weldment)
-        @test length(weld_g.nodes) == 8
+        @test length(weld_g.nodes) == 9
         @test count(isstock, weld_g.nodes) == 3
         @test weld_g.nodes[end] === weldment
-        @test parent(weldment) == AbstractPart[fp_cut, plate_h2, axle]
-        @test length(operations(weldment)) == 5
+        @test parent(w1) == (fp_cut => plate_h2)
+        @test parent(weldment) == (w1 => axle)
+        @test length(operations(weldment)) == 6
         @test length(operations_of_type(Cut, weldment)) == 1
         @test length(operations_of_type(Drill, weldment)) == 2
         @test length(operations_of_type(Saw, weldment)) == 1
-        @test length(operations_of_type(Weld, weldment)) == 1
+        @test length(operations_of_type(Weld, weldment)) == 2
 
         expected_weld_dot = join([
             "digraph ManufacturingGraph {",
@@ -284,31 +296,45 @@ end
             "  n2 [label=\"stock Plate\\n8.0 × 4.0\\nt=0.1875\"];",
             "  n3 [label=\"part Plate\\n8.0 × 4.0\\nt=0.1875\"];",
             "  n4 [label=\"part Plate\\n8.0 × 4.0\\nt=0.1875\"];",
-            "  n5 [label=\"stock RoundTube\\n1.0 × 240.0\\nt=0.12\"];",
-            "  n6 [label=\"part RoundTube\\n1.0 × 20.0\\nt=0.12\"];",
-            "  n7 [label=\"part Weldment\\n3 parts\"];",
+            "  n5 [label=\"part Weldment\"];",
+            "  n6 [label=\"stock RoundTube\\n1.0 × 240.0\\nt=0.12\"];",
+            "  n7 [label=\"part RoundTube\\n1.0 × 20.0\\nt=0.12\"];",
+            "  n8 [label=\"part Weldment\"];",
             "  n0 -> n1 [label=\"Cut(Rectangle(9.0, 8.5), (12.0, 7.0, 0.1875))\"];",
             "  n2 -> n3 [label=\"Drill(Circle(1.0), (2.0, 2.0, 0.1875), ThroughAll)\"];",
             "  n3 -> n4 [label=\"Drill(Circle(0.625), (6.0, 2.0, 0.1875), ThroughAll)\"];",
-            "  n5 -> n6 [label=\"Saw((0.0, 0.0, 20.0), (0.0, 0.0, 1.0))\"];",
-            "  n1 -> n7 [label=\"Weld\"];",
-            "  n4 -> n7 [label=\"Weld\"];",
-            "  n6 -> n7 [label=\"Weld\"];",
+            "  n1 -> n5 [label=\"Weld(LineSegment(8.0), (4.0, 2.0, 0.0))\"];",
+            "  n4 -> n5 [label=\"Weld(LineSegment(8.0), (4.0, 2.0, 0.0))\"];",
+            "  n6 -> n7 [label=\"Saw((0.0, 0.0, 20.0), (0.0, 0.0, 1.0))\"];",
+            "  n5 -> n8 [label=\"Weld(Circle(1.0), (6.0, 4.0, 0.1875))\"];",
+            "  n7 -> n8 [label=\"Weld(Circle(1.0), (6.0, 4.0, 0.1875))\"];",
             "}",
         ], '\n') * '\n'
         @test to_dot(weld_g) == expected_weld_dot
 
-        # Diamond DAG with shared ancestor and duplicate part instance
+        # Diamond DAG with shared ancestor and duplicate parent part
         forked = fork_parts()
-        diamond_weld = weld([
-            forked.a => IdentityRigidTransform,
-            forked.b => Translation(6.0, 0.0, 0.0),
-            forked.a => Translation(12.0, 0.0, 0.0),
-        ])
+        diamond_weld = weld(
+            forked.a,
+            Datum(Translation(3.0, 0.0, 0.0) ∘ LinearMap(RotZ(π / 2))),
+            forked.b,
+            Datum(LinearMap(RotZ(π / 2))),
+            LineSegment(3.0),
+        )
         diamond_g = ManufacturingGraph(diamond_weld)
         @test diamond_g.nodes == AbstractPart[forked.stick, forked.blank, forked.a, forked.b, diamond_weld]
         diamond_dot = to_dot(diamond_g)
-        @test count(==("  n2 -> n4 [label=\"Weld\"];"), split(chomp(diamond_dot), '\n')) == 1
-        @test count(==("  n3 -> n4 [label=\"Weld\"];"), split(chomp(diamond_dot), '\n')) == 1
+        @test count(==("  n2 -> n4 [label=\"Weld(LineSegment(3.0), (3.0, 0.0, 0.0))\"];"), split(chomp(diamond_dot), '\n')) == 1
+        @test count(==("  n3 -> n4 [label=\"Weld(LineSegment(3.0), (3.0, 0.0, 0.0))\"];"), split(chomp(diamond_dot), '\n')) == 1
+
+        same_weld = weld(
+            forked.a,
+            Datum(Translation(3.0, 0.0, 0.0) ∘ LinearMap(RotZ(π / 2))),
+            forked.a,
+            Datum(LinearMap(RotZ(π / 2))),
+            LineSegment(3.0),
+        )
+        same_dot = to_dot(ManufacturingGraph(same_weld))
+        @test count(==("  n2 -> n3 [label=\"Weld(LineSegment(3.0), (3.0, 0.0, 0.0))\"];"), split(chomp(same_dot), '\n')) == 1
     end
 end

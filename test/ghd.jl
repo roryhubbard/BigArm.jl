@@ -223,26 +223,39 @@ end
 
     # Welded steel frame DAG and mesh
     @test frame isa Weldment
-    @test length(frame) == 6
-    @test operation(frame) === Weld()
+    @test operation(frame) isa Weld
+    @test operation(frame).profile === LineSegment(1.0)
     frame_g = ManufacturingGraph(frame)
     @test frame_g.nodes[end] === frame
     @test count(isstock, frame_g.nodes) == 4
     @test length(operations_of_type(Cut, frame)) == 1
     @test length(operations_of_type(Drill, frame)) == 6
     @test length(operations_of_type(Saw, frame)) == 1
-    @test length(operations_of_type(Weld, frame)) == 1
+    weld_ops = operations_of_type(Weld, frame)
+    @test length(weld_ops) == 5
+    @test [op.profile for op in weld_ops] == [
+        LineSegment(0.1875),
+        LineSegment(0.1875),
+        Circle(1.0),
+        Circle(1.0),
+        LineSegment(1.0),
+    ]
     frame_dot = to_dot(frame_g)
-    @test occursin("part Weldment\\n6 parts", frame_dot)
-    @test count(line -> occursin("[label=\"Weld\"]", line), split(chomp(frame_dot), '\n')) == 4
+    @test occursin("part Weldment", frame_dot)
+    @test occursin("Weld(LineSegment(0.1875), (10.5, 2.75, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(0.1875), (13.6875, 2.75, 0.0))", frame_dot)
+    @test occursin("Weld(Circle(1.0), (5.0, 1.0, 0.1875))", frame_dot)
+    @test occursin("Weld(Circle(1.0), (5.0, 9.5, 0.1875))", frame_dot)
+    @test occursin("Weld(LineSegment(1.0), (12.09375, 1.75, 0.0))", frame_dot)
+    @test count(line -> occursin("[label=\"Weld(", line), split(chomp(frame_dot), '\n')) == 10
 
     for node in frame_g.nodes
         check_manifold_and_volume(derive_mesh(node))
     end
     frame_mesh = derive_mesh(frame)
     lo_f, hi_f = mesh_bbox(frame_mesh)
-    @test lo_f ≈ SVector(0.5, -10.5, 0.0) atol = 1e-12
-    @test hi_f ≈ SVector(9.0, 13.5, 14.0) atol = 1e-12
+    @test lo_f ≈ SVector(0.0, 0.0, -2.5) atol = 1e-12
+    @test hi_f ≈ SVector(24.0, 14.0, 6.0) atol = 1e-12
     frame_stats = check_manifold_and_volume(frame_mesh)
     @test frame_stats.volume ≈
           fp_stats.volume + 2 * ear_stats.volume + web_stats.volume + 2 * axle_stats.volume atol = 1e-9
@@ -265,12 +278,18 @@ end
     @test frame_part isa Weldment
     @test all(r -> r isa RoundTube, (ll_roller, lr_roller, ul_roller, ur_roller))
 
-    _, _ = frame_part[1]
-    left_ear_part, t_left_ear = frame_part[2]
-    right_ear_part, t_right_ear = frame_part[3]
-    web_part, t_web = frame_part[4]
-    _, t_lower_axle = frame_part[5]
-    _, t_upper_axle = frame_part[6]
+    # Extract relative transforms from the weld tree (`frame = ((footplate + left_ear) + right_ear) + ((web + lower_axle) + upper_axle)`)
+    w_ears, web_assembly = parent(frame_part)
+    w_left, right_ear_part = parent(w_ears)
+    _, left_ear_part = parent(w_left)
+    w_web_lower, _ = parent(web_assembly)
+    web_part, _ = parent(w_web_lower)
+
+    t_left_ear = BigArm._weld_transform(operation(w_left))
+    t_right_ear = BigArm._weld_transform(operation(w_ears))
+    t_web = BigArm._weld_transform(operation(frame_part))
+    t_lower_axle = t_web ∘ BigArm._weld_transform(operation(w_web_lower))
+    t_upper_axle = t_web ∘ BigArm._weld_transform(operation(web_assembly))
 
     upright_holes = operations_of_type(Drill, upright_part)
     left_ear_holes = operations_of_type(Drill, left_ear_part)

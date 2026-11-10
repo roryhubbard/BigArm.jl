@@ -403,12 +403,28 @@ end
             ThroughAll(),
         )
         axle = saw(RoundTube(1.0, 240.0, 0.120), Datum(Translation(0.0, 0.0, 20.0)))
-        weldment = weld([
-            base_plate => IdentityRigidTransform,
-            ear => Translation(7.5, 2.75, 0.1875) ∘ LinearMap(RotY(-π / 2)),
-            ear => Translation(16.5 + 0.1875, 2.75, 0.1875) ∘ LinearMap(RotY(-π / 2)),
-            axle => Translation(2.0, 7.0, 5.0) ∘ LinearMap(RotY(π / 2)),
-        ])
+        d_ear = Datum(LinearMap(RotZ(π / 2)))
+        ear_with_axle = weld(
+            ear,
+            Datum(Translation(1.5, 4.25, 0.1875)),
+            axle,
+            Datum(Translation(0.0, 0.0, 10.0)),
+            Circle(1.0),
+        )
+        w1 = weld(
+            base_plate,
+            Datum(Translation(7.5, 2.75, 0.1875) ∘ LinearMap(RotZ(π / 2) * RotX(-π / 2))),
+            ear_with_axle,
+            d_ear,
+            LineSegment(8.5),
+        )
+        weldment = weld(
+            w1,
+            Datum(Translation(16.5 + 0.1875, 2.75, 0.1875) ∘ LinearMap(RotZ(π / 2) * RotX(-π / 2))),
+            ear,
+            d_ear,
+            LineSegment(8.5),
+        )
 
         s_base = check_manifold_and_volume(derive_mesh(base_plate))
         s_ear = check_manifold_and_volume(derive_mesh(ear))
@@ -417,8 +433,8 @@ end
         m_weld = derive_mesh(weldment)
         @test m_weld isa Mesh
         lo_w, hi_w = mesh_bbox(m_weld)
-        @test lo_w ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
-        @test hi_w ≈ SVector(24.0, 14.0, 5.5) atol = 1e-12
+        @test lo_w ≈ SVector(-2.6875, 0.0, 0.0) atol = 1e-12
+        @test hi_w ≈ SVector(24.0, 14.0, 2.6875) atol = 1e-12
 
         s_weld = check_manifold_and_volume(m_weld)
         @test s_weld.nverts == s_base.nverts + 2 * s_ear.nverts + s_axle.nverts
@@ -445,10 +461,13 @@ end
             Datum(Translation(4.0, 2.0, 0.25)),
         )
         axle = saw(RoundTube(1.0, 240.0, 0.120), Datum(Translation(0.0, 0.0, 20.0)))
-        weldment = weld([
-            one_hole => IdentityRigidTransform,
-            plate => Translation(-1.5, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
-        ])
+        weldment = weld(
+            one_hole,
+            Datum(Translation(0.0, 0.0, 5.0)),
+            plate,
+            Datum(Translation(1.5, 0.0, 0.0)),
+            LineSegment(1.5),
+        )
         for p in (stick, blank, one_hole, multi_hole, plate, axle, weldment)
             returned = visualize(p; vis=vis, open_browser=false)
             @test returned === vis

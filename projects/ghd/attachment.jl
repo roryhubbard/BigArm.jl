@@ -247,11 +247,12 @@ end
     build_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec()) -> Weldment
 
 Build the welded Echo GHD steel frame joining the windowed footplate, left and
-right 7-hole upright side ears, central roller standoff web, and lower and upper
-roller axle shafts.
+right 4-hole upright side ears, central roller standoff web, and lower and upper
+roller axle shafts via explicit joint datums and weld seams.
 
-In the weldment local frame, the upright occupies `X ∈ [0, ear_spacing]` and
-`Y ∈ [0, ear_spacing]`, with the footplate spanning `Z ∈ [0, footplate_height]`.
+The weldment's local coordinate frame is the footplate's frame (`x ∈ [0, 24]`
+width, `y ∈ [0, 14]` height, `z ∈ [0, 0.1875]` thickness, with `z = 0` on the
+upright-facing back surface).
 """
 function build_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     footplate = build_footplate(spec)
@@ -259,39 +260,44 @@ function build_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSp
     web = build_standoff_web(spec)
     axle = build_roller_axle(spec)
 
-    upright_front_x = spec.ear_spacing
-    center_y = spec.ear_spacing / 2.0
-    center_z = spec.footplate_height / 2.0
-    ear_z0 = center_z - spec.ear_height / 2.0
-    web_z0 = center_z - spec.web_height / 2.0
-    axle_x = upright_front_x + spec.web_axle_hole_x
-    axle_y0 = center_y - spec.axle_length / 2.0
-    lower_axle_z = web_z0 + spec.web_axle_hole_ys[1]
-    upper_axle_z = web_z0 + spec.web_axle_hole_ys[2]
+    center_x = spec.footplate_width / 2.0
+    center_y = spec.footplate_height / 2.0
+    ear_y0 = center_y - spec.ear_height / 2.0
+    web_y0 = center_y - spec.web_height / 2.0
+    web_bridge_overlap = (spec.web_height - spec.window_height) / 2.0
 
-    t_footplate =
-        Translation(upright_front_x, center_y - spec.footplate_width / 2.0, 0.0) ∘
-        LinearMap(RotZ(π / 2) * RotX(π / 2))
-    t_left_ear =
-        Translation(upright_front_x, -spec.ear_thickness, ear_z0) ∘
-        LinearMap(RotZ(π) * RotX(π / 2))
-    t_right_ear =
-        Translation(upright_front_x, spec.ear_spacing, ear_z0) ∘
-        LinearMap(RotZ(π) * RotX(π / 2))
-    t_web =
-        Translation(upright_front_x, center_y + spec.web_thickness / 2.0, web_z0) ∘
-        LinearMap(RotX(π / 2))
-    t_lower_axle = Translation(axle_x, axle_y0, lower_axle_z) ∘ LinearMap(RotX(-π / 2))
-    t_upper_axle = Translation(axle_x, axle_y0, upper_axle_z) ∘ LinearMap(RotX(-π / 2))
+    # 1. Left and right side ears welded along their bottom-front thickness edge
+    #    (x=0, y=0, z∈[0, 0.1875]) to the bottom edge (y=2.75, z=0) of the
+    #    footplate cutout window straddling the 3.0 in upright.
+    d_ear = Datum(Translation(0.0, 0.0, spec.ear_thickness) ∘ LinearMap(RotY(π / 2)))
+    d_fp_left = Datum(
+        Translation(center_x - spec.ear_spacing / 2.0, ear_y0, 0.0) ∘
+        LinearMap(RotY(π)),
+    )
+    d_fp_right = Datum(
+        Translation(center_x + spec.ear_spacing / 2.0 + spec.ear_thickness, ear_y0, 0.0) ∘
+        LinearMap(RotY(π)),
+    )
+    frame = weld(footplate, d_fp_left, ear, d_ear, LineSegment(spec.ear_thickness))
+    frame = weld(frame, d_fp_right, ear, d_ear, LineSegment(spec.ear_thickness))
 
-    return weld([
-        footplate => t_footplate,
-        ear => t_left_ear,
-        ear => t_right_ear,
-        web => t_web,
-        axle => t_lower_axle,
-        axle => t_upper_axle,
-    ])
+    # 2. Lower and upper roller axle shafts welded circumferentially (Circle(1.0))
+    #    into the standoff web's lower and upper 1.0 in axle holes.
+    d_axle = Datum(Translation(0.0, 0.0, spec.axle_length / 2.0 + spec.web_thickness / 2.0))
+    axle_seam = Circle(spec.axle_outer_diameter)
+    web_assembly = web
+    for hole_op in operations_of_type(Drill, web)
+        web_assembly = weld(web_assembly, hole_op.datum, axle, d_axle, axle_seam)
+    end
+
+    # 3. Central roller standoff web sub-weldment welded along its lower 1.0 in rear
+    #    bridge tab (x=0, y∈[0, 1.0], z=0) to the footplate's lower bridge at x = 12.0 + t/2.
+    d_web = Datum(LinearMap(RotZ(π / 2)))
+    d_fp_web = Datum(
+        Translation(center_x + spec.web_thickness / 2.0, web_y0, 0.0) ∘
+        LinearMap(RotZ(π / 2) * RotX(-π / 2)),
+    )
+    return weld(frame, d_fp_web, web_assembly, d_web, LineSegment(web_bridge_overlap))
 end
 
 """
@@ -303,7 +309,7 @@ end
 
 Assemble the SM-2.5 upright, the Design B welded Echo GHD steel frame
 (`Weldment`), and the four cylindrical foam rollers in a shared 3D coordinate
-frame, with the middle (4th) hole of the side ears pinned at upright hole
+frame, with the second hole of the side ears pinned at upright hole
 `mount_hole_index`.
 """
 function build_echo_ghd_assembly(;
@@ -321,15 +327,22 @@ function build_echo_ghd_assembly(;
     pin_ear_z = ear_z0 + attachment_spec.ear_first_hole_y + attachment_spec.ear_hole_spacing
     mount_z = pin_z - pin_ear_z
 
+    upright_front_x = attachment_spec.ear_spacing
+    upright_center_y = attachment_spec.ear_spacing / 2.0
     web_z0 = mount_z + center_z - attachment_spec.web_height / 2.0
     lower_axle_z = web_z0 + attachment_spec.web_axle_hole_ys[1]
     upper_axle_z = web_z0 + attachment_spec.web_axle_hole_ys[2]
-    axle_x = attachment_spec.ear_spacing + attachment_spec.web_axle_hole_x
+    axle_x = upright_front_x + attachment_spec.web_axle_hole_x
     left_roller_y0 = -attachment_spec.roller_inner_offset_y - attachment_spec.roller_length
     right_roller_y0 = attachment_spec.ear_spacing + attachment_spec.roller_inner_offset_y
 
     t_upright = IdentityRigidTransform
-    t_frame = Translation(0.0, 0.0, mount_z)
+    t_frame =
+        Translation(
+            upright_front_x,
+            upright_center_y - attachment_spec.footplate_width / 2.0,
+            mount_z,
+        ) ∘ LinearMap(RotZ(π / 2) * RotX(π / 2))
     t_lower_left_roller = Translation(axle_x, left_roller_y0, lower_axle_z) ∘ LinearMap(RotX(-π / 2))
     t_lower_right_roller = Translation(axle_x, right_roller_y0, lower_axle_z) ∘ LinearMap(RotX(-π / 2))
     t_upper_left_roller = Translation(axle_x, left_roller_y0, upper_axle_z) ∘ LinearMap(RotX(-π / 2))

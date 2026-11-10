@@ -54,10 +54,6 @@ function _part_summary(part::Plate)
     return "$kind Plate\n$dims\nt=$(_fmt(part.thickness))"
 end
 
-function _part_summary(part::Weldment)
-    return "part Weldment\n$(length(part.parts)) parts"
-end
-
 function _part_summary(part::AbstractPart)
     kind = isstock(part) ? "stock" : "part"
     return "$kind $(nameof(typeof(part)))"
@@ -82,6 +78,9 @@ function _op_label(op::Drill)
     return "Drill(Circle($(_fmt(op.profile.diameter))), $position, $(_pen_label(op.penetration)))"
 end
 
+_profile_label(profile::LineSegment) = "LineSegment($(_fmt(profile.length)))"
+_profile_label(profile::Circle) = "Circle($(_fmt(profile.diameter)))"
+
 function _profile_label(profile::Polygon)
     pts = profile.points
     if length(pts) == 4
@@ -101,10 +100,18 @@ function _profile_label(profile::Polygon)
     return "Polygon($(length(pts)))"
 end
 
+_profile_label(profile::AbstractProfile) = string(nameof(typeof(profile)))
+
 function _op_label(op::Cut)
     p = origin(op.datum)
     position = "($(_fmt(p[1])), $(_fmt(p[2])), $(_fmt(p[3])))"
     return "Cut($(_profile_label(op.profile)), $position)"
+end
+
+function _op_label(op::Weld)
+    p = origin(op.datum_a)
+    position = "($(_fmt(p[1])), $(_fmt(p[2])), $(_fmt(p[3])))"
+    return "Weld($(_profile_label(op.profile)), $position)"
 end
 
 _op_label(op::AbstractOperation) = string(nameof(typeof(op)))
@@ -129,7 +136,7 @@ function to_dot(g::ManufacturingGraph)
         isstock(node) && continue
         label = _dot_escape(_op_label(operation(node)))
         ps = parent(node)
-        if ps isa AbstractVector
+        if ps isa Pair
             seen = IdSet{AbstractPart}()
             for p in ps
                 p in seen && continue
