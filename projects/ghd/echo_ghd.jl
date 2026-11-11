@@ -17,7 +17,7 @@ Base.@kwdef struct EchoGHDAttachmentSpec
     footplate_height::Float64 = 14.0           # Photo-estimated: 14.0 in tall
     footplate_thickness::Float64 = 0.1875      # Published: 3/16 in steel plate
     window_width::Float64 = 9.0                # Photo-estimated: 9.0 in center window width
-    window_height::Float64 = 8.5               # Photo-estimated: 8.5 in center window height
+    window_height::Float64 = 6.5               # Photo-estimated: 6.5 in center window height (ears & web overlap top/bottom bridges)
 
     # Upright side mounting ears (2×)
     ear_width::Float64 = 2.5                   # Photo-estimated: 2.5 in deep
@@ -141,22 +141,23 @@ function build_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSp
     center_y = spec.footplate_height / 2.0
     ear_y0 = center_y - spec.ear_height / 2.0
     web_y0 = center_y - spec.web_height / 2.0
+    ear_bridge_overlap = (spec.ear_height - spec.window_height) / 2.0
     web_bridge_overlap = (spec.web_height - spec.window_height) / 2.0
 
-    # 1. Left and right side ears welded along their bottom-front thickness edge
-    #    (x=0, y=0, z∈[0, 0.1875]) to the bottom edge (y=2.75, z=0) of the
-    #    footplate cutout window straddling the 3.0 in upright.
-    d_ear = Datum(Translation(0.0, 0.0, spec.ear_thickness) ∘ LinearMap(RotY(π / 2)))
+    # 1. Left and right side ears welded along their lower rear bridge tab
+    #    (x=0, y∈[0, ear_bridge_overlap], z=0) to the footplate's lower bridge
+    #    straddling the 3.0 in upright.
+    d_ear = Datum(LinearMap(RotZ(π / 2)))
     d_fp_left = Datum(
-        Translation(center_x - spec.ear_spacing / 2.0, ear_y0, 0.0) ∘
-        LinearMap(RotY(π)),
+        Translation(center_x - spec.ear_spacing / 2.0 - spec.ear_thickness, ear_y0, 0.0) ∘
+        LinearMap(RotZ(π / 2) * RotX(π / 2)),
     )
     d_fp_right = Datum(
-        Translation(center_x + spec.ear_spacing / 2.0 + spec.ear_thickness, ear_y0, 0.0) ∘
-        LinearMap(RotY(π)),
+        Translation(center_x + spec.ear_spacing / 2.0, ear_y0, 0.0) ∘
+        LinearMap(RotZ(π / 2) * RotX(π / 2)),
     )
-    frame = weld(footplate, d_fp_left, ear, d_ear, LineSegment(spec.ear_thickness))
-    frame = weld(frame, d_fp_right, ear, d_ear, LineSegment(spec.ear_thickness))
+    frame = weld(footplate, d_fp_left, ear, d_ear, LineSegment(ear_bridge_overlap))
+    frame = weld(frame, d_fp_right, ear, d_ear, LineSegment(ear_bridge_overlap))
 
     # 2. Lower and upper roller axle shafts welded circumferentially (Circle(1.0))
     #    into the standoff web's lower and upper 1.0 in axle holes.

@@ -103,6 +103,8 @@ end
 Return a counter-clockwise 2D polygon outline approximating `profile` in its
 local datum XY plane.
 """
+_outline(profile::LineSegment) = Point2d[Point2d(0.0, 0.0), Point2d(profile.length, 0.0)]
+
 function _outline(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
     r = profile.diameter / 2.0
     return Point2d[
