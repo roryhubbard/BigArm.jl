@@ -1,4 +1,42 @@
 """
+    AbstractPenetration
+
+Supertype for discrete cut penetration / termination modes.
+"""
+abstract type AbstractPenetration end
+
+"""
+    ThroughAll()
+
+Singleton penetration mode: cut through the entire cross-section (both datum
+and opposite walls).
+"""
+struct ThroughAll <: AbstractPenetration end
+
+"""
+    ThroughWall()
+
+Singleton penetration mode: cut through the datum wall into the cavity only.
+"""
+struct ThroughWall <: AbstractPenetration end
+
+"""
+    Blind(depth)
+
+Blind-hole penetration of `depth` (inches, `Float64`) for solid stock. Not valid
+on thin-wall tubes.
+"""
+struct Blind <: AbstractPenetration
+    depth::Float64
+
+    function Blind(depth::Real)
+        d = Float64(depth)
+        d > 0.0 || throw(DomainError(depth, "Blind depth must be positive"))
+        return new(d)
+    end
+end
+
+"""
     Saw(datum::Datum)
 
 Saw operation slicing along the XY plane of `datum`, keeping the half-space on
@@ -40,17 +78,6 @@ struct Weld <: AbstractOperation
     datum_a::Datum
     datum_b::Datum
     profile::AbstractProfile
-end
-
-"""
-    Weldment(parent::Pair{<:AbstractPart,<:AbstractPart}, op::Weld)
-
-Welded `AbstractPart` node produced from two input parts `parent` (`part_a => part_b`)
-by `op::Weld`.
-"""
-struct Weldment <: AbstractPart
-    parent::Pair{AbstractPart,AbstractPart}
-    op::Weld
 end
 
 """
