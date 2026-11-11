@@ -528,6 +528,8 @@ function _seam_on_part(part::RoundTube, datum::Datum, profile::Circle)
     return true
 end
 
+_seam_on_part(::RoundTube, ::Datum, ::LineSegment) = false
+
 # Relative rigid transform placing `part_b` into `part_a`'s frame by gluing `datum_b` onto `datum_a`.
 _weld_transform(op::Weld) = op.datum_a.transform ∘ inv(op.datum_b.transform)
 
