@@ -541,6 +541,17 @@ function _seam_on_part(part::RoundTube, datum::CylindricalDatum, profile::Circle
     return true
 end
 
+function _seam_on_part(part::RoundTube, datum::CylindricalDatum, profile::LineSegment)
+    p0 = origin(datum)
+    # Line start point must sit on the outer cylindrical wall (radius = outer_diameter / 2).
+    abs(hypot(p0[1], p0[2]) - part.outer_diameter / 2.0) <= _ATOL || return false
+    # Line direction (+xaxis) must point along the tube's +Z axis.
+    dot(xaxis(datum), SVector(0.0, 0.0, 1.0)) > 1.0 - _ATOL || return false
+    # Both endpoints of the line segment must lie between the bottom and top sawn ends of the tube.
+    zb, zt = _tube_z_bounds(part, p0[1], p0[2])
+    return zb - _ATOL <= p0[3] && p0[3] + profile.length <= zt + _ATOL
+end
+
 # Relative rigid transform placing `part_b` into `part_a`'s frame by gluing `datum_b` onto `datum_a`.
 _weld_transform(op::Weld) = op.datum_a.frame ∘ inv(op.datum_b.frame)
 

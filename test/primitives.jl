@@ -139,6 +139,12 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test operation(w) isa AbstractOperation
         @test parent(w) == (stick => plate)
 
+        # Straight line weld along the outer wall of a RoundTube
+        d_round_line = CylindricalDatum(Translation(0.5, 0.0, 5.0) ∘ LinearMap(RotY(-π / 2)))
+        w_round_line = weld(round_stick, d_round_line, plate, d_plate_weld, LineSegment(4.0))
+        @test w_round_line isa Weldment
+        @test parent(w_round_line) == (round_stick => plate)
+
         asm = Assembly([
             stick => IdentityRigidTransform,
             plate => Translation(3.0, 0.0, 10.0) ∘ LinearMap(RotX(π / 2)),
@@ -454,6 +460,10 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         d_tube = CylindricalDatum(Translation(0.0, 0.0, 10.0))
         @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, d_tube, Circle(1.5))
         @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, CylindricalDatum(Translation(0.0, 0.0, 25.0)), Circle(1.0))
+        # Line weld off RoundTube outer wall, not parallel to Z, or past sawn end fails
+        @test_throws ArgumentError weld(round_blank, CylindricalDatum(Translation(0.4, 0.0, 5.0) ∘ LinearMap(RotY(-π / 2))), ear, d_ear, LineSegment(4.0))
+        @test_throws ArgumentError weld(round_blank, CylindricalDatum(Translation(0.5, 0.0, 5.0)), ear, d_ear, LineSegment(4.0))
+        @test_throws ArgumentError weld(round_blank, CylindricalDatum(Translation(0.5, 0.0, 18.0) ∘ LinearMap(RotY(-π / 2))), ear, d_ear, LineSegment(4.0))
     end
 
     @testset "Dispatch enforcement" begin
@@ -499,7 +509,7 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError weld(plate, Datum(), blank, Datum(), Rectangle(1.0, 1.0))
         @test_throws MethodError weld(plate, Datum(), blank, Datum(), 3.0)
         @test_throws MethodError weld(plate, dp, round_blank, Datum(Translation(0.0, 0.0, 10.0)), Circle(1.0))
-        @test_throws MethodError weld(plate, dp, round_blank, CylindricalDatum(Translation(0.0, 0.0, 10.0)), LineSegment(1.0))
+        @test_throws MethodError weld(plate, dp, round_blank, Datum(Translation(0.5, 0.0, 5.0) ∘ LinearMap(RotY(-π / 2))), LineSegment(1.0))
         @test_throws MethodError weld(plate, CylindricalDatum(), blank, Datum(), LineSegment(1.0))
     end
 end
