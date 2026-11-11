@@ -119,11 +119,11 @@ _outline(profile::Polygon) = profile.points
     _project_outline(profile::AbstractProfile, from::Datum, onto::Datum=Datum()) -> Vector{Point2d}
 
 Project `_outline(profile)` from `from`'s local XY plane onto `onto`'s XY plane
-(via `inv(onto.transform) ∘ from.transform`) and normalize to counter-clockwise
+(via `inv(onto.frame) ∘ from.frame`) and normalize to counter-clockwise
 2D winding order.
 """
 function _project_outline(profile::AbstractProfile, from::Datum, onto::Datum=Datum())
-    T_onto_from = inv(onto.transform) ∘ from.transform
+    T_onto_from = inv(onto.frame) ∘ from.frame
     outline = Point2d[Point2d(T_onto_from(SVector(u[1], u[2], 0.0))[1:2]) for u in _outline(profile)]
     _is_ccw(_to_geos_polygon(outline)) || reverse!(outline)
     return outline

@@ -9,7 +9,7 @@ include(joinpath(@__DIR__, "..", "projects", "ghd", "bolted_arm.jl"))
 include(joinpath(@__DIR__, "..", "projects", "ghd", "echo_ghd.jl"))
 
 function world_hole_datum(transform::RigidTransform, op::Drill)
-    return Datum(transform ∘ op.datum.transform)
+    return Datum(transform ∘ op.datum.frame)
 end
 
 function world_tube_axis_datum(transform::RigidTransform)
@@ -53,7 +53,7 @@ end
     @test_throws ArgumentError drill(
         upright,
         Circle(4.0),
-        Datum(front.transform ∘ Translation(1.5, 51.0, 0.0)),
+        Datum(front.frame ∘ Translation(1.5, 51.0, 0.0)),
         ThroughAll(),
     )
 

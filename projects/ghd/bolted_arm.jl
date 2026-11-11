@@ -56,11 +56,11 @@ function build_mounting_plate(spec::MountingPlateSpec=MountingPlateSpec())
     hole = Circle(spec.hole_diameter)
 
     for y in spec.upright_hole_ys
-        d = Datum(top.transform ∘ Translation(spec.upright_hole_x, y, 0.0))
+        d = Datum(top.frame ∘ Translation(spec.upright_hole_x, y, 0.0))
         plate = drill(plate, hole, d, ThroughAll())
     end
     for x in spec.arm_hole_xs
-        d = Datum(top.transform ∘ Translation(x, spec.arm_hole_y, 0.0))
+        d = Datum(top.frame ∘ Translation(x, spec.arm_hole_y, 0.0))
         plate = drill(plate, hole, d, ThroughAll())
     end
     return plate
@@ -81,7 +81,7 @@ function build_arm(spec::ArmSpec=ArmSpec())
 
     arm = blank
     for y in spec.hole_ys
-        d = Datum(front.transform ∘ Translation(center_x, y, 0.0))
+        d = Datum(front.frame ∘ Translation(center_x, y, 0.0))
         arm = drill(arm, hole, d, ThroughAll())
     end
     return arm

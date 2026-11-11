@@ -3,7 +3,7 @@ using Rotations: Rotation, RotX, RotY, RotZ
 using StaticArrays: SVector
 
 at(d::Datum, x::Real, y::Real, z::Real=0.0) =
-    Datum(d.transform ∘ Translation(SVector{3,Float64}(x, y, z)))
+    Datum(d.frame ∘ Translation(SVector{3,Float64}(x, y, z)))
 
 @testset "Primitives and manufacturability rules" begin
     @testset "Type hierarchy, Datum SE(3) transforms, and valid construction" begin
@@ -451,9 +451,9 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         # Circular weld with wrong diameter or outside tube length fails
         drilled_plate = drill(plate, Circle(1.0), at(top, 3.0, 2.0), ThroughAll())
         d_hole = at(top, 3.0, 2.0)
-        d_tube = Datum(Translation(0.0, 0.0, 10.0))
+        d_tube = CylindricalDatum(Translation(0.0, 0.0, 10.0))
         @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, d_tube, Circle(1.5))
-        @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, Datum(Translation(0.0, 0.0, 25.0)), Circle(1.0))
+        @test_throws ArgumentError weld(drilled_plate, d_hole, round_blank, CylindricalDatum(Translation(0.0, 0.0, 25.0)), Circle(1.0))
     end
 
     @testset "Dispatch enforcement" begin

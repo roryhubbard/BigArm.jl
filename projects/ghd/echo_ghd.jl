@@ -62,7 +62,7 @@ function build_footplate(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     plate = Plate(spec.footplate_width, spec.footplate_height, spec.footplate_thickness)
     top = datum(plate, SVector(0, 0, 1))
     window_center = Datum(
-        top.transform ∘ Translation(spec.footplate_width / 2.0, spec.footplate_height / 2.0, 0.0),
+        top.frame ∘ Translation(spec.footplate_width / 2.0, spec.footplate_height / 2.0, 0.0),
     )
     return cut(plate, Rectangle(spec.window_width, spec.window_height), window_center)
 end
@@ -78,7 +78,7 @@ function build_side_ear(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     hole = Circle(spec.ear_hole_diameter)
     for i in 0:(spec.ear_hole_count - 1)
         y = spec.ear_first_hole_y + i * spec.ear_hole_spacing
-        d = Datum(top.transform ∘ Translation(spec.ear_hole_x, y, 0.0))
+        d = Datum(top.frame ∘ Translation(spec.ear_hole_x, y, 0.0))
         ear = drill(ear, hole, d, ThroughAll())
     end
     return ear
@@ -94,7 +94,7 @@ function build_standoff_web(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     top = datum(web, SVector(0, 0, 1))
     hole = Circle(spec.web_axle_hole_diameter)
     for y in spec.web_axle_hole_ys
-        d = Datum(top.transform ∘ Translation(spec.web_axle_hole_x, y, 0.0))
+        d = Datum(top.frame ∘ Translation(spec.web_axle_hole_x, y, 0.0))
         web = drill(web, hole, d, ThroughAll())
     end
     return web
@@ -161,7 +161,7 @@ function build_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSp
 
     # 2. Lower and upper roller axle shafts welded circumferentially (Circle(1.0))
     #    into the standoff web's lower and upper 1.0 in axle holes.
-    d_axle = Datum(Translation(0.0, 0.0, spec.axle_length / 2.0 + spec.web_thickness / 2.0))
+    d_axle = CylindricalDatum(Translation(0.0, 0.0, spec.axle_length / 2.0 + spec.web_thickness / 2.0))
     axle_seam = Circle(spec.axle_outer_diameter)
     web_assembly = web
     for hole_op in operations_of_type(Drill, web)

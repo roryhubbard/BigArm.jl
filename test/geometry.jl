@@ -66,24 +66,24 @@ end
     one_wall = drill(
         blank,
         Circle(1.0),
-        Datum(front.transform ∘ Translation(1.5, 10.0, 0.0)),
+        Datum(front.frame ∘ Translation(1.5, 10.0, 0.0)),
         ThroughWall(),
     )
     one_hole = drill(
         blank,
         Circle(1.0),
-        Datum(front.transform ∘ Translation(1.0, 10.0, 0.0)),
+        Datum(front.frame ∘ Translation(1.0, 10.0, 0.0)),
         ThroughAll(),
     )
     multi_hole = drill(
         drill(
             one_hole,
             Circle(1.0),
-            Datum(front.transform ∘ Translation(1.5, 20.0, 0.0)),
+            Datum(front.frame ∘ Translation(1.5, 20.0, 0.0)),
             ThroughAll(),
         ),
         Circle(0.5),
-        Datum(right.transform ∘ Translation(1.5, 30.0, 0.0)),
+        Datum(right.frame ∘ Translation(1.5, 30.0, 0.0)),
         ThroughAll(),
     )
 
@@ -190,7 +190,7 @@ end
         tube_slot_1 = cut(
             blank,
             Rectangle(1.0, 2.0),
-            Datum(front.transform ∘ Translation(1.5, 10.0, 0.0)),
+            Datum(front.frame ∘ Translation(1.5, 10.0, 0.0)),
         )
         m_slot_1 = derive_mesh(tube_slot_1)
         s_slot_1 = check_manifold_and_volume(m_slot_1)
@@ -200,7 +200,7 @@ end
         tube_slot_2 = cut(
             tube_slot_1,
             Rectangle(1.0, 2.0),
-            Datum(back.transform ∘ Translation(1.5, 10.0, 0.0)),
+            Datum(back.frame ∘ Translation(1.5, 10.0, 0.0)),
         )
         m_slot_2 = derive_mesh(tube_slot_2)
         s_slot_2 = check_manifold_and_volume(m_slot_2)
@@ -251,7 +251,7 @@ end
         bottom = datum(raw_plate, SVector(0, 0, -1))
 
         # Single through-hole from top (+Z)
-        p1 = drill(raw_plate, Circle(1.0), Datum(top.transform ∘ Translation(2.0, 2.0, 0.0)), ThroughAll())
+        p1 = drill(raw_plate, Circle(1.0), Datum(top.frame ∘ Translation(2.0, 2.0, 0.0)), ThroughAll())
         m1 = derive_mesh(p1)
         lo_1, hi_1 = mesh_bbox(m1)
         @test lo_1 ≈ SVector(0.0, 0.0, 0.0) atol = 1e-12
@@ -269,7 +269,7 @@ end
         end
 
         # Second through-hole from bottom (-Z) with ThroughWall (at bottom x=1.5 -> 3D X=4.5)
-        p2 = drill(p1, Circle(1.0), Datum(bottom.transform ∘ Translation(1.5, 2.0, 0.0)), ThroughWall())
+        p2 = drill(p1, Circle(1.0), Datum(bottom.frame ∘ Translation(1.5, 2.0, 0.0)), ThroughWall())
         m2 = derive_mesh(p2)
         s2 = check_manifold_and_volume(m2)
         @test s2.euler == -2
@@ -284,8 +284,8 @@ end
         end
 
         # Blind holes from top and bottom surfaces
-        p3 = drill(p2, Circle(0.5), Datum(top.transform ∘ Translation(3.25, 1.0, 0.0)), Blind(0.1))
-        p4 = drill(p3, Circle(0.5), Datum(bottom.transform ∘ Translation(2.75, 3.0, 0.0)), Blind(0.1))
+        p3 = drill(p2, Circle(0.5), Datum(top.frame ∘ Translation(3.25, 1.0, 0.0)), Blind(0.1))
+        p4 = drill(p3, Circle(0.5), Datum(bottom.frame ∘ Translation(2.75, 3.0, 0.0)), Blind(0.1))
         for node in ManufacturingGraph(p4).nodes
             mn = derive_mesh(node)
             @test mn isa Mesh
@@ -302,7 +302,7 @@ end
         fp_window = cut(
             fp_stock,
             Rectangle(9.0, 8.5),
-            Datum(fp_top.transform ∘ Translation(12.0, 7.0, 0.0)),
+            Datum(fp_top.frame ∘ Translation(12.0, 7.0, 0.0)),
         )
         m_fp = derive_mesh(fp_window)
         lo_fp, hi_fp = mesh_bbox(m_fp)
@@ -329,10 +329,10 @@ end
             cut(
                 fp_window,
                 Rectangle(2.0, 1.5),
-                Datum(fp_bottom.transform ∘ Translation(3.0, 7.0, 0.0)),
+                Datum(fp_bottom.frame ∘ Translation(3.0, 7.0, 0.0)),
             ),
             Circle(1.0),
-            Datum(fp_top.transform ∘ Translation(3.0, 7.0, 0.0)),
+            Datum(fp_top.frame ∘ Translation(3.0, 7.0, 0.0)),
             ThroughAll(),
         )
         s_combo = check_manifold_and_volume(derive_mesh(fp_combo))
@@ -408,7 +408,7 @@ end
             ear,
             Datum(Translation(1.5, 4.25, 0.1875)),
             axle,
-            Datum(Translation(0.0, 0.0, 10.0)),
+            CylindricalDatum(Translation(0.0, 0.0, 10.0)),
             Circle(1.0),
         )
         w1 = weld(

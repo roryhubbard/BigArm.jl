@@ -81,7 +81,7 @@ function _add_planar_face!(
 )
     pts2d, tris = _triangulate_2d(outer, hole_outlines)
     zf = Float64(z)
-    vmap = [_vertex!(b, datum.transform(SVector(p[1], p[2], zf))) for p in pts2d]
+    vmap = [_vertex!(b, datum.frame(SVector(p[1], p[2], zf))) for p in pts2d]
     for (i1, i2, i3) in tris
         if flip
             push!(b.faces, TriangleFace{Int}(vmap[i1], vmap[i3], vmap[i2]))
@@ -138,8 +138,8 @@ function _add_extruded_outline!(
 )
     zf = Float64(z_front)
     zb = Float64(z_back)
-    front_v = [_vertex!(b, datum.transform(SVector(p[1], p[2], zf))) for p in outline]
-    back_v = [_vertex!(b, datum.transform(SVector(p[1], p[2], zb))) for p in outline]
+    front_v = [_vertex!(b, datum.frame(SVector(p[1], p[2], zf))) for p in outline]
+    back_v = [_vertex!(b, datum.frame(SVector(p[1], p[2], zb))) for p in outline]
     _stitch_rings!(b, front_v, back_v; flip=outward)
     return nothing
 end

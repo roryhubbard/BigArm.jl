@@ -69,14 +69,14 @@ struct Cut <: AbstractOperation
 end
 
 """
-    Weld(datum_a::Datum, datum_b::Datum, profile::AbstractProfile)
+    Weld(datum_a::AbstractDatum, datum_b::AbstractDatum, profile::AbstractProfile)
 
 Welding operation joining `part_b` (at `datum_b`) to `part_a` (at `datum_a`)
 along `profile`.
 """
 struct Weld <: AbstractOperation
-    datum_a::Datum
-    datum_b::Datum
+    datum_a::AbstractDatum
+    datum_b::AbstractDatum
     profile::AbstractProfile
 end
 
@@ -99,7 +99,7 @@ verify that `origin(datum)` lies on `face`'s surface (`z == 0`), and return
 """
 function _match_face(part::AbstractPart, datum::Datum)
     face = BigArm.datum(part, zaxis(datum))
-    T_face_datum = inv(face.transform) ∘ datum.transform
+    T_face_datum = inv(face.frame) ∘ datum.frame
     x, y, z = T_face_datum.translation
     abs(z) <= _ATOL ||
         throw(ArgumentError("Datum origin $(origin(datum)) does not lie on the surface of face with normal $(zaxis(face)) (normal offset z=$z)"))
@@ -218,8 +218,8 @@ top heights after any straight or miter `Saw` cuts.
 function _tube_wall_outline(part::RectangularTube, face::Datum, inset::Real=0.0)
     d = Float64(inset)
     x0, x1 = d, _face_width(part, face) - d
-    p0 = face.transform(SVector(x0, 0.0, -d))
-    p1 = face.transform(SVector(x1, 0.0, -d))
+    p0 = face.frame(SVector(x0, 0.0, -d))
+    p1 = face.frame(SVector(x1, 0.0, -d))
     zb0, zt0 = _tube_z_bounds(part, p0[1], p0[2])
     zb1, zt1 = _tube_z_bounds(part, p1[1], p1[2])
     return Point2d[Point2d(x0, zb0), Point2d(x1, zb1), Point2d(x1, zt1), Point2d(x0, zt0)]
@@ -346,7 +346,7 @@ function drill(
         (0.0, -part.thickness, -cross_depth + part.thickness, -cross_depth) :
         (0.0, -part.thickness)
     for u in (x - r, x + r), zd in z_depths
-        p3 = face.transform(SVector(u, y, zd))
+        p3 = face.frame(SVector(u, y, zd))
         zb, zt = _tube_z_bounds(part, p3[1], p3[2])
         (zb + r < y && y < zt - r) || throw(
             ArgumentError(
@@ -413,7 +413,7 @@ function cut(
 )
     face, _, _ = _match_face(part, datum)
     face_width = _face_width(part, face)
-    T_face_datum = inv(face.transform) ∘ datum.transform
+    T_face_datum = inv(face.frame) ∘ datum.frame
     for u in profile.points
         pf = T_face_datum(SVector(u[1], u[2], 0.0))
         (part.thickness < pf[1] && pf[1] < face_width - part.thickness) || throw(
@@ -422,7 +422,7 @@ function cut(
             ),
         )
         for zd in (0.0, -part.thickness)
-            p3 = face.transform(SVector(pf[1], pf[2], zd))
+            p3 = face.frame(SVector(pf[1], pf[2], zd))
             zb, zt = _tube_z_bounds(part, p3[1], p3[2])
             (zb < pf[2] && pf[2] < zt) || throw(
                 ArgumentError(
@@ -481,7 +481,7 @@ function _seam_on_face(
     datum::Datum,
     profile::Union{LineSegment,Circle},
 )
-    T_face_datum = inv(face.transform) ∘ datum.transform
+    T_face_datum = inv(face.frame) ∘ datum.frame
     coords = Vector{Float64}[]
     for u in _outline(profile)
         p = T_face_datum(SVector(u[1], u[2], 0.0))
@@ -524,7 +524,7 @@ function _seam_on_part(
     return false
 end
 
-function _seam_on_part(part::RoundTube, datum::Datum, profile::Circle)
+function _seam_on_part(part::RoundTube, datum::CylindricalDatum, profile::Circle)
     p0 = origin(datum)
     # Circle center must lie on the tube's Z centerline (x = 0, y = 0).
     hypot(p0[1], p0[2]) <= _ATOL || return false
@@ -541,23 +541,23 @@ function _seam_on_part(part::RoundTube, datum::Datum, profile::Circle)
     return true
 end
 
-_seam_on_part(::RoundTube, ::Datum, ::LineSegment) = false
+_seam_on_part(::AbstractPart, ::AbstractDatum, ::Union{LineSegment,Circle}) = false
 
 # Relative rigid transform placing `part_b` into `part_a`'s frame by gluing `datum_b` onto `datum_a`.
-_weld_transform(op::Weld) = op.datum_a.transform ∘ inv(op.datum_b.transform)
+_weld_transform(op::Weld) = op.datum_a.frame ∘ inv(op.datum_b.frame)
 
-function _seam_on_part(part::Weldment, datum::Datum, profile::Union{LineSegment,Circle})
+function _seam_on_part(part::Weldment, datum::AbstractDatum, profile::Union{LineSegment,Circle})
     T_a_b = _weld_transform(part.op)
     return _seam_on_part(part.parent[1], datum, profile) ||
-           _seam_on_part(part.parent[2], Datum(inv(T_a_b) ∘ datum.transform), profile)
+           _seam_on_part(part.parent[2], _transform_datum(inv(T_a_b), datum), profile)
 end
 
 """
     weld(
         part_a::AbstractPart,
-        datum_a::Datum,
+        datum_a::AbstractDatum,
         part_b::AbstractPart,
-        datum_b::Datum,
+        datum_b::AbstractDatum,
         profile::Union{LineSegment,Circle},
     ) -> Weldment
 
@@ -570,9 +570,9 @@ Validates that `profile` lies on the surface of both `part_a` (at `datum_a`) and
 """
 function weld(
     part_a::AbstractPart,
-    datum_a::Datum,
+    datum_a::AbstractDatum,
     part_b::AbstractPart,
-    datum_b::Datum,
+    datum_b::AbstractDatum,
     profile::Union{LineSegment,Circle},
 )
     op = Weld(datum_a, datum_b, profile)
