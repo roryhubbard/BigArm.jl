@@ -107,6 +107,42 @@ function _add_planar_face!(
     return nothing
 end
 
+"""
+    _stitch_rings!(b, ring1, ring2; flip=false)
+
+Stitch two equal-length closed vertex-index rings `ring1` and `ring2` into `b`
+as a quad strip of `2 * length(ring1)` triangles. Setting `flip=true` reverses
+triangle winding to invert the surface normal.
+"""
+function _stitch_rings!(
+    b::_MeshBuilder,
+    ring1::AbstractVector{Int},
+    ring2::AbstractVector{Int};
+    flip::Bool=false,
+)
+    n = length(ring1)
+    for i in 1:n
+        j = i == n ? 1 : i + 1
+        v1a, v1b = ring1[i], ring1[j]
+        v2a, v2b = ring2[i], ring2[j]
+        if flip
+            push!(b.faces, TriangleFace{Int}(v1a, v2b, v1b))
+            push!(b.faces, TriangleFace{Int}(v1a, v2a, v2b))
+        else
+            push!(b.faces, TriangleFace{Int}(v1a, v1b, v2b))
+            push!(b.faces, TriangleFace{Int}(v1a, v2b, v2a))
+        end
+    end
+    return nothing
+end
+
+"""
+    _add_extruded_loop!(b, datum, loop; z_front=0.0, z_back, outward=false)
+
+Extrude a closed 2D counter-clockwise `loop` in `datum`'s XY plane from `z_front`
+to `z_back` and stitch the side wall into `b`. Normals point inward (for hole
+barrels) when `outward=false` and outward (for outer perimeters) when `outward=true`.
+"""
 function _add_extruded_loop!(
     b::_MeshBuilder,
     datum::Datum,
@@ -117,21 +153,9 @@ function _add_extruded_loop!(
 )
     zf = Float64(z_front)
     zb = Float64(z_back)
-    n = length(loop)
     front_v = [_vertex!(b, datum.transform(SVector(p[1], p[2], zf))) for p in loop]
     back_v = [_vertex!(b, datum.transform(SVector(p[1], p[2], zb))) for p in loop]
-    for i in 1:n
-        j = i == n ? 1 : i + 1
-        vf1, vf2 = front_v[i], front_v[j]
-        vb1, vb2 = back_v[i], back_v[j]
-        if outward
-            push!(b.faces, TriangleFace{Int}(vf1, vb2, vf2))
-            push!(b.faces, TriangleFace{Int}(vf1, vb1, vb2))
-        else
-            push!(b.faces, TriangleFace{Int}(vf1, vf2, vb2))
-            push!(b.faces, TriangleFace{Int}(vf1, vb2, vb1))
-        end
-    end
+    _stitch_rings!(b, front_v, back_v; flip=outward)
     return nothing
 end
 
@@ -176,26 +200,41 @@ function _add_slab!(
     return nothing
 end
 
-function _add_annular_cap!(
-    b::_MeshBuilder,
-    outer_v::AbstractVector{Int},
-    inner_v::AbstractVector{Int};
-    flip::Bool=false,
-)
-    n = length(outer_v)
-    for i in 1:n
-        j = i == n ? 1 : i + 1
-        vo1, vo2 = outer_v[i], outer_v[j]
-        vi1, vi2 = inner_v[i], inner_v[j]
-        if flip
-            push!(b.faces, TriangleFace{Int}(vo1, vi2, vo2))
-            push!(b.faces, TriangleFace{Int}(vo1, vi1, vi2))
-        else
-            push!(b.faces, TriangleFace{Int}(vo1, vo2, vi2))
-            push!(b.faces, TriangleFace{Int}(vo1, vi2, vi1))
-        end
+"""
+    _tube_end_rings!(b, part, loop) -> Tuple{Vector{Int},Vector{Int}}
+
+Register 3D vertices in `b` at the bottom and top sawn axial bounds of `part`
+for each 2D cross-section point in `loop`, returning `(v_bot, v_top)`.
+"""
+function _tube_end_rings!(b::_MeshBuilder, part::AbstractTube, loop::AbstractVector{Point2d})
+    n = length(loop)
+    v_bot = Vector{Int}(undef, n)
+    v_top = Vector{Int}(undef, n)
+    for (i, p) in enumerate(loop)
+        zb, zt = _tube_z_bounds(part, p[1], p[2])
+        v_bot[i] = _vertex!(b, SVector(p[1], p[2], zb))
+        v_top[i] = _vertex!(b, SVector(p[1], p[2], zt))
     end
-    return nothing
+    return v_bot, v_top
+end
+
+"""
+    _add_tube_caps!(b, part, outer, inner) -> NTuple{4,Vector{Int}}
+
+Add the bottom and top annular end caps of `part` between 2D cross-section loops
+`outer` and `inner` to `b`, and return their vertex-index rings `(v_ob, v_ot, v_ib, v_it)`.
+"""
+function _add_tube_caps!(
+    b::_MeshBuilder,
+    part::AbstractTube,
+    outer::AbstractVector{Point2d},
+    inner::AbstractVector{Point2d},
+)
+    v_ob, v_ot = _tube_end_rings!(b, part, outer)
+    v_ib, v_it = _tube_end_rings!(b, part, inner)
+    _stitch_rings!(b, v_ob, v_ib; flip=true)
+    _stitch_rings!(b, v_ot, v_it; flip=false)
+    return v_ob, v_ot, v_ib, v_it
 end
 
 """
@@ -235,14 +274,12 @@ function derive_mesh(part::RectangularTube)
         _add_slab!(b, face, outer_wall, inner_wall, wall_holes, t)
     end
 
-    cap_outer = _rect_loop(0.0, 0.0, part.width, part.height)
-    cap_inner = _rect_loop(t, t, part.width - t, part.height - t)
-    v_ob = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in cap_outer]
-    v_ot = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in cap_outer]
-    v_ib = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in cap_inner]
-    v_it = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in cap_inner]
-    _add_annular_cap!(b, v_ob, v_ib; flip=true)
-    _add_annular_cap!(b, v_ot, v_it; flip=false)
+    _add_tube_caps!(
+        b,
+        part,
+        _rect_loop(0.0, 0.0, part.width, part.height),
+        _rect_loop(t, t, part.width - t, part.height - t),
+    )
 
     return Mesh(b.points, b.faces)
 end
@@ -258,23 +295,9 @@ function derive_mesh(part::RoundTube)
     b = _MeshBuilder()
     outer = _contour(Circle(part.outer_diameter))
     inner = _contour(Circle(part.outer_diameter - 2.0 * part.thickness))
-    n = length(outer)
-
-    v_ob = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in outer]
-    v_ot = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in outer]
-    v_ib = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in inner]
-    v_it = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in inner]
-
-    for i in 1:n
-        j = i == n ? 1 : i + 1
-        push!(b.faces, TriangleFace{Int}(v_ot[i], v_ob[j], v_ot[j]))
-        push!(b.faces, TriangleFace{Int}(v_ot[i], v_ob[i], v_ob[j]))
-        push!(b.faces, TriangleFace{Int}(v_it[i], v_it[j], v_ib[j]))
-        push!(b.faces, TriangleFace{Int}(v_it[i], v_ib[j], v_ib[i]))
-    end
-
-    _add_annular_cap!(b, v_ot, v_it; flip=false)
-    _add_annular_cap!(b, v_ob, v_ib; flip=true)
+    v_ob, v_ot, v_ib, v_it = _add_tube_caps!(b, part, outer, inner)
+    _stitch_rings!(b, v_ot, v_ob; flip=true)
+    _stitch_rings!(b, v_it, v_ib; flip=false)
     return Mesh(b.points, b.faces)
 end
 
