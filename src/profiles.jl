@@ -37,7 +37,7 @@ struct Circle <: AbstractProfile
     end
 end
 
-function _rect_loop(x0::Real, y0::Real, x1::Real, y1::Real)
+function _rect_outline(x0::Real, y0::Real, x1::Real, y1::Real)
     return Point2d[
         Point2d(Float64(x0), Float64(y0)),
         Point2d(Float64(x1), Float64(y0)),
@@ -46,9 +46,9 @@ function _rect_loop(x0::Real, y0::Real, x1::Real, y1::Real)
     ]
 end
 
-function _to_geos_polygon(loop::AbstractVector{Point2d})
-    coords = Vector{Float64}[[p[1], p[2]] for p in loop]
-    push!(coords, [loop[1][1], loop[1][2]])
+function _to_geos_polygon(outline::AbstractVector{Point2d})
+    coords = Vector{Float64}[[p[1], p[2]] for p in outline]
+    push!(coords, [outline[1][1], outline[1][2]])
     return LibGEOS.Polygon([coords])
 end
 
@@ -94,16 +94,16 @@ function Rectangle(width::Real, height::Real)
     h = Float64(height)
     w > 0.0 || throw(DomainError(width, "Rectangle width must be positive"))
     h > 0.0 || throw(DomainError(height, "Rectangle height must be positive"))
-    return Polygon(_rect_loop(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0))
+    return Polygon(_rect_outline(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0))
 end
 
 """
-    _contour(profile::AbstractProfile) -> Vector{Point2d}
+    _outline(profile::AbstractProfile) -> Vector{Point2d}
 
-Return a counter-clockwise 2D polygon loop approximating `profile` in its local
-datum XY plane.
+Return a counter-clockwise 2D polygon outline approximating `profile` in its
+local datum XY plane.
 """
-function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
+function _outline(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
     r = profile.diameter / 2.0
     return Point2d[
         Point2d(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
@@ -111,18 +111,18 @@ function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
     ]
 end
 
-_contour(profile::Polygon) = profile.points
+_outline(profile::Polygon) = profile.points
 
 """
-    _project_loop(profile::AbstractProfile, from::Datum, onto::Datum=Datum()) -> Vector{Point2d}
+    _project_outline(profile::AbstractProfile, from::Datum, onto::Datum=Datum()) -> Vector{Point2d}
 
-Project `_contour(profile)` from `from`'s local XY plane onto `onto`'s XY plane
+Project `_outline(profile)` from `from`'s local XY plane onto `onto`'s XY plane
 (via `inv(onto.transform) ∘ from.transform`) and normalize to counter-clockwise
 2D winding order.
 """
-function _project_loop(profile::AbstractProfile, from::Datum, onto::Datum=Datum())
+function _project_outline(profile::AbstractProfile, from::Datum, onto::Datum=Datum())
     T_onto_from = inv(onto.transform) ∘ from.transform
-    loop = Point2d[Point2d(T_onto_from(SVector(u[1], u[2], 0.0))[1:2]) for u in _contour(profile)]
-    _is_ccw(_to_geos_polygon(loop)) || reverse!(loop)
-    return loop
+    outline = Point2d[Point2d(T_onto_from(SVector(u[1], u[2], 0.0))[1:2]) for u in _outline(profile)]
+    _is_ccw(_to_geos_polygon(outline)) || reverse!(outline)
+    return outline
 end

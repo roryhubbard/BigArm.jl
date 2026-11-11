@@ -211,14 +211,14 @@ end
     @testset "2.5D slab generality and dispatch" begin
         b = BigArm._MeshBuilder()
         plate_datum = Datum(IdentityRigidTransform)
-        outer = BigArm._rect_loop(0.0, 0.0, 6.0, 4.0)
-        hole_loop = Point2d[Point2d(p[1] + 3.0, p[2] + 2.0) for p in BigArm._contour(Circle(1.0))]
+        outer = BigArm._rect_outline(0.0, 0.0, 6.0, 4.0)
+        hole_outline = Point2d[Point2d(p[1] + 3.0, p[2] + 2.0) for p in BigArm._outline(Circle(1.0))]
         BigArm._add_slab!(
             b,
             plate_datum,
             outer,
             outer,
-            [hole_loop],
+            [hole_outline],
             0.25;
             close_perimeter=true,
         )

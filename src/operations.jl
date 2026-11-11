@@ -160,11 +160,11 @@ function _tube_z_bounds(part::AbstractTube, x::Real, y::Real)
     return (zb, zt)
 end
 
-_cross_section_points(part::RectangularTube) = _rect_loop(0.0, 0.0, part.width, part.height)
-_cross_section_points(part::RoundTube) = _contour(Circle(part.outer_diameter))
+_cross_section_points(part::RectangularTube) = _rect_outline(0.0, 0.0, part.width, part.height)
+_cross_section_points(part::RoundTube) = _outline(Circle(part.outer_diameter))
 
 """
-    _tube_wall_loop(part::RectangularTube, face::Datum, inset::Real=0.0) -> Vector{Point2d}
+    _tube_wall_outline(part::RectangularTube, face::Datum, inset::Real=0.0) -> Vector{Point2d}
 
 Return the 4 corners of one flat wall `face` of a `RectangularTube` in `face`'s
 2D coordinates:
@@ -175,7 +175,7 @@ Return the 4 corners of one flat wall `face` of a `RectangularTube` in `face`'s
 At the left (`x0`) and right (`x1`) edges, `_tube_z_bounds` finds the bottom and
 top heights after any straight or miter `Saw` cuts.
 """
-function _tube_wall_loop(part::RectangularTube, face::Datum, inset::Real=0.0)
+function _tube_wall_outline(part::RectangularTube, face::Datum, inset::Real=0.0)
     d = Float64(inset)
     x0, x1 = d, _face_width(part, face) - d
     p0 = face.transform(SVector(x0, 0.0, -d))
@@ -210,7 +210,7 @@ end
 # the current outer 2D polygon of the plate.
 function _plate_polygon(part::Plate)
     root = _root_stock(part)
-    poly = _to_geos_polygon(_rect_loop(0.0, 0.0, root.width, root.height))
+    poly = _to_geos_polygon(_rect_outline(0.0, 0.0, root.width, root.height))
     for op in operations_of_type(Saw, part)
         poly = LibGEOS.intersection(poly, _halfplane_polygon(poly, origin(op.datum), zaxis(op.datum)))
     end
@@ -410,7 +410,7 @@ function cut(
 )
     _match_face(part, datum)
     shrunk = LibGEOS.buffer(_plate_polygon(part), -_ATOL)
-    cutout = _to_geos_polygon(_project_loop(profile, datum))
+    cutout = _to_geos_polygon(_project_outline(profile, datum))
     LibGEOS.contains(shrunk, cutout) || throw(
         ArgumentError(
             "Cutout at $(origin(datum)) must lie wholly within plate perimeter",
@@ -430,7 +430,7 @@ _pierces_face(op::Cut, face::Datum) = dot(zaxis(op.datum), zaxis(face)) > 1.0 - 
 
 # Return the 3D vertices of a weld seam `profile` transformed by `T`:
 # - For `LineSegment(L)`, the two endpoints `(0, 0, 0)` and `(L, 0, 0)` along `+xaxis`.
-# - For `Circle(d)`, the closed 32-segment contour loop in the datum XY plane.
+# - For `Circle(d)`, the closed 32-segment outline in the datum XY plane.
 function _seam_3d_points(profile::LineSegment, T)
     return SVector{3,Float64}[
         T(SVector(0.0, 0.0, 0.0)),
@@ -439,7 +439,7 @@ function _seam_3d_points(profile::LineSegment, T)
 end
 
 function _seam_3d_points(profile::Circle, T)
-    pts = SVector{3,Float64}[T(SVector(u[1], u[2], 0.0)) for u in _contour(profile)]
+    pts = SVector{3,Float64}[T(SVector(u[1], u[2], 0.0)) for u in _outline(profile)]
     # Repeat the first vertex at the end so `LibGEOS.LineString` includes the closing segment `pts[end] -> pts[1]`.
     push!(pts, pts[1])
     return pts
@@ -472,7 +472,7 @@ function _seam_on_subpart(part::Plate, T_local, profile::Union{LineSegment,Circl
                 any(p -> p[3] <= op.penetration.depth + _ATOL, pts)
             in_depth || continue
         end
-        poly = LibGEOS.difference(poly, _to_geos_polygon(_project_loop(op.profile, op.datum)))
+        poly = LibGEOS.difference(poly, _to_geos_polygon(_project_outline(op.profile, op.datum)))
     end
 
     on_flat_face = all(p -> abs(p[3]) <= _ATOL, pts) || all(p -> abs(p[3] - t) <= _ATOL, pts)
@@ -490,8 +490,8 @@ function _seam_on_subpart(part::RoundTube, T_local, profile::Union{LineSegment,C
         (zb - _ATOL <= p[3] <= zt + _ATOL) || return false
     end
 
-    outer = _to_geos_polygon(_contour(Circle(part.outer_diameter)))
-    inner = _to_geos_polygon(_contour(Circle(part.outer_diameter - 2.0 * part.thickness)))
+    outer = _to_geos_polygon(_outline(Circle(part.outer_diameter)))
+    inner = _to_geos_polygon(_outline(Circle(part.outer_diameter - 2.0 * part.thickness)))
     annulus = LibGEOS.difference(outer, inner)
     on_end_cap =
         all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[1]) <= _ATOL, pts) ||
@@ -518,8 +518,8 @@ function _seam_on_subpart(part::RectangularTube, T_local, profile::Union{LineSeg
         all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[2]) <= _ATOL, pts)
     if on_end_cap
         annulus = LibGEOS.difference(
-            _to_geos_polygon(_rect_loop(0.0, 0.0, w, h)),
-            _to_geos_polygon(_rect_loop(t, t, w - t, h - t)),
+            _to_geos_polygon(_rect_outline(0.0, 0.0, w, h)),
+            _to_geos_polygon(_rect_outline(t, t, w - t, h - t)),
         )
         LibGEOS.covers(LibGEOS.buffer(annulus, _ATOL), _seam_2d_geom(pts)) && return true
     end
@@ -529,10 +529,10 @@ function _seam_on_subpart(part::RectangularTube, T_local, profile::Union{LineSeg
         fpts = SVector{3,Float64}[inv(face.transform)(p) for p in pts]
         all(fp -> -t - _ATOL <= fp[3] <= _ATOL, fpts) || continue
 
-        wall_poly = _to_geos_polygon(_tube_wall_loop(part, face))
+        wall_poly = _to_geos_polygon(_tube_wall_outline(part, face))
         for op in operations_of_type(Union{Drill,Cut}, part)
             _pierces_face(op, face) || continue
-            wall_poly = LibGEOS.difference(wall_poly, _to_geos_polygon(_project_loop(op.profile, op.datum, face)))
+            wall_poly = LibGEOS.difference(wall_poly, _to_geos_polygon(_project_outline(op.profile, op.datum, face)))
         end
 
         on_wall_face = all(fp -> abs(fp[3]) <= _ATOL, fpts) || all(fp -> abs(fp[3] + t) <= _ATOL, fpts)
