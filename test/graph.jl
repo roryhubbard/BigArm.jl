@@ -6,7 +6,7 @@ place(d::Datum, x::Real, y::Real, z::Real=0.0) =
 
 function chain_parts()
     stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
-    blank = saw(stick, 103.0)
+    blank = saw(stick, Datum(Translation(0.0, 0.0, 103.0)))
     front = datum(blank, SVector(0, -1, 0))
     first = drill(blank, Circle(1.0), place(front, 1.5, 10.0), ThroughAll())
     second = drill(first, Circle(0.75), place(front, 1.5, 20.0), ThroughWall())
@@ -15,7 +15,7 @@ end
 
 function fork_parts()
     stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
-    blank = saw(stick, 103.0)
+    blank = saw(stick, Datum(Translation(0.0, 0.0, 103.0)))
     front = datum(blank, SVector(0, -1, 0))
     right = datum(blank, SVector(1, 0, 0))
     a = drill(blank, Circle(1.0), place(front, 1.5, 10.0), ThroughAll())
@@ -43,15 +43,15 @@ end
             @test operation(g.nodes[i]) isa AbstractOperation
         end
         @test operation(g.nodes[2]) isa Saw
-        @test operation(g.nodes[2]).length === 103.0
+        @test origin(operation(g.nodes[2]).datum) ≈ SVector(0.0, 0.0, 103.0) atol = 1e-12
         @test operation(g.nodes[3]) isa Drill
         @test operation(g.nodes[3]).penetration isa ThroughAll
         @test operation(g.nodes[4]) isa Drill
         @test operation(g.nodes[4]).penetration isa ThroughWall
 
         @test !isstock(g.nodes[end])
-        @test isempty(holes(g.nodes[1]))
-        @test length(holes(g.nodes[end])) == 2
+        @test isempty(operations(g.nodes[1]))
+        @test count(op -> op isa Drill, operations(g.nodes[end])) == 2
 
         stock = ManufacturingGraph(parts.stick)
         @test length(stock.nodes) == 1
@@ -99,15 +99,15 @@ end
         @test ops[3].penetration isa ThroughWall
         @test origin(ops[3].datum) ≈ SVector(1.5, 0.0, 20.0) atol = 1e-9
 
-        shortened = saw(parts.second, 40.0)
+        shortened = saw(parts.second, Datum(Translation(0.0, 0.0, 40.0)))
         shortened_ops = operations(shortened)
         @test length(shortened_ops) == 4
         @test shortened_ops[1] isa Saw
-        @test shortened_ops[1].length === 103.0
+        @test origin(shortened_ops[1].datum) ≈ SVector(0.0, 0.0, 103.0) atol = 1e-12
         @test shortened_ops[2] isa Drill
         @test shortened_ops[3] isa Drill
         @test shortened_ops[4] isa Saw
-        @test shortened_ops[4].length === 40.0
+        @test origin(shortened_ops[4].datum) ≈ SVector(0.0, 0.0, 40.0) atol = 1e-12
 
         forked = fork_parts()
         @test length(operations(forked.a)) == 2
@@ -120,7 +120,7 @@ end
         @test origin(operations(forked.c)[end].datum) ≈ SVector(3.0, 1.5, 40.0) atol = 1e-9
 
         stick = RectangularTube(3.0, 3.0, 80.0, 0.120)
-        blank = saw(stick, 40.0)
+        blank = saw(stick, Datum(Translation(0.0, 0.0, 40.0)))
         front = datum(blank, SVector(0, -1, 0))
         upright = blank
         ys = 2.0:2.0:20.0
@@ -147,7 +147,7 @@ end
             "  n0 [label=\"stock RectangularTube\\n3.0 × 3.0 × 288.0\\nt=0.12\"];",
             "  n1 [label=\"part RectangularTube\\n3.0 × 3.0 × 103.0\\nt=0.12\"];",
             "  n2 [label=\"part RectangularTube\\n3.0 × 3.0 × 103.0\\nt=0.12\"];",
-            "  n0 -> n1 [label=\"Saw(103.0)\"];",
+            "  n0 -> n1 [label=\"Saw((0.0, 0.0, 103.0), (0.0, 0.0, 1.0))\"];",
             "  n1 -> n2 [label=\"Drill(Circle(1.0), (1.5, 0.0, 10.0), ThroughAll)\"];",
             "}",
         ], '\n') * '\n'
@@ -160,7 +160,7 @@ end
         @test occursin("node [shape=box];", dot)
         @test occursin("n0 [label=\"stock RectangularTube\\n3.0 × 3.0 × 288.0\\nt=0.12\"];", dot)
         @test occursin("n3 [label=\"part RectangularTube\\n3.0 × 3.0 × 103.0\\nt=0.12\"];", dot)
-        @test occursin("n0 -> n1 [label=\"Saw(103.0)\"];", dot)
+        @test occursin("n0 -> n1 [label=\"Saw((0.0, 0.0, 103.0), (0.0, 0.0, 1.0))\"];", dot)
         @test occursin("n2 -> n3 [label=\"Drill(Circle(0.75), (1.5, 0.0, 20.0), ThroughWall)\"];", dot)
         @test count(==('{'), dot) == 1
         @test count(==('}'), dot) == 1
@@ -221,5 +221,120 @@ end
             "}",
         ], '\n') * '\n'
         @test to_dot(plate_g) == expected_plate_dot
+
+        axle_stock = RoundTube(1.0, 240.0, 0.120)
+        saw_d = Datum(Translation(0.0, 0.0, 20.0))
+        axle = saw(axle_stock, saw_d)
+        axle_g = ManufacturingGraph(axle)
+        @test length(axle_g.nodes) == 2
+        @test axle_g.nodes[1] === axle_stock
+        @test axle_g.nodes[2] === axle
+        @test only(operations(axle)) === Saw(saw_d)
+        expected_axle_dot = join([
+            "digraph ManufacturingGraph {",
+            "  rankdir=TB;",
+            "  node [shape=box];",
+            "  n0 [label=\"stock RoundTube\\n1.0 × 240.0\\nt=0.12\"];",
+            "  n1 [label=\"part RoundTube\\n1.0 × 20.0\\nt=0.12\"];",
+            "  n0 -> n1 [label=\"Saw((0.0, 0.0, 20.0), (0.0, 0.0, 1.0))\"];",
+            "}",
+        ], '\n') * '\n'
+        @test to_dot(axle_g) == expected_axle_dot
+
+        fp_stock = Plate(24.0, 14.0, 0.1875)
+        fp_top = datum(fp_stock, SVector(0, 0, 1))
+        fp_cut = cut(fp_stock, Rectangle(9.0, 8.5), place(fp_top, 12.0, 7.0))
+        fp_g = ManufacturingGraph(fp_cut)
+        @test length(fp_g.nodes) == 2
+        @test only(operations(fp_cut)) isa Cut
+        expected_fp_dot = join([
+            "digraph ManufacturingGraph {",
+            "  rankdir=TB;",
+            "  node [shape=box];",
+            "  n0 [label=\"stock Plate\\n24.0 × 14.0\\nt=0.1875\"];",
+            "  n1 [label=\"part Plate\\n24.0 × 14.0\\nt=0.1875\"];",
+            "  n0 -> n1 [label=\"Cut(Rectangle(9.0, 8.5), (12.0, 7.0, 0.1875))\"];",
+            "}",
+        ], '\n') * '\n'
+        @test to_dot(fp_g) == expected_fp_dot
+
+        # Multi-parent DAG for a Weldment (linear and circular welds)
+        w1 = weld(
+            fp_cut,
+            Datum(Translation(4.0, 2.0, 0.0)),
+            plate_h2,
+            Datum(),
+            LineSegment(8.0),
+        )
+        T_plate_h2 = BigArm._weld_transform(operation(w1))
+        d_hole_in_w1 = Datum(T_plate_h2 ∘ place(top, 2.0, 2.0).transform)
+        weldment = weld(
+            w1,
+            d_hole_in_w1,
+            axle,
+            Datum(Translation(0.0, 0.0, 10.0)),
+            Circle(1.0),
+        )
+        weld_g = ManufacturingGraph(weldment)
+        @test length(weld_g.nodes) == 9
+        @test count(isstock, weld_g.nodes) == 3
+        @test weld_g.nodes[end] === weldment
+        @test parent(w1) == (fp_cut => plate_h2)
+        @test parent(weldment) == (w1 => axle)
+        @test length(operations(weldment)) == 6
+        @test length(operations_of_type(Cut, weldment)) == 1
+        @test length(operations_of_type(Drill, weldment)) == 2
+        @test length(operations_of_type(Saw, weldment)) == 1
+        @test length(operations_of_type(Weld, weldment)) == 2
+
+        expected_weld_dot = join([
+            "digraph ManufacturingGraph {",
+            "  rankdir=TB;",
+            "  node [shape=box];",
+            "  n0 [label=\"stock Plate\\n24.0 × 14.0\\nt=0.1875\"];",
+            "  n1 [label=\"part Plate\\n24.0 × 14.0\\nt=0.1875\"];",
+            "  n2 [label=\"stock Plate\\n8.0 × 4.0\\nt=0.1875\"];",
+            "  n3 [label=\"part Plate\\n8.0 × 4.0\\nt=0.1875\"];",
+            "  n4 [label=\"part Plate\\n8.0 × 4.0\\nt=0.1875\"];",
+            "  n5 [label=\"part Weldment\"];",
+            "  n6 [label=\"stock RoundTube\\n1.0 × 240.0\\nt=0.12\"];",
+            "  n7 [label=\"part RoundTube\\n1.0 × 20.0\\nt=0.12\"];",
+            "  n8 [label=\"part Weldment\"];",
+            "  n0 -> n1 [label=\"Cut(Rectangle(9.0, 8.5), (12.0, 7.0, 0.1875))\"];",
+            "  n2 -> n3 [label=\"Drill(Circle(1.0), (2.0, 2.0, 0.1875), ThroughAll)\"];",
+            "  n3 -> n4 [label=\"Drill(Circle(0.625), (6.0, 2.0, 0.1875), ThroughAll)\"];",
+            "  n1 -> n5 [label=\"Weld(LineSegment(8.0), (4.0, 2.0, 0.0))\"];",
+            "  n4 -> n5 [label=\"Weld(LineSegment(8.0), (4.0, 2.0, 0.0))\"];",
+            "  n6 -> n7 [label=\"Saw((0.0, 0.0, 20.0), (0.0, 0.0, 1.0))\"];",
+            "  n5 -> n8 [label=\"Weld(Circle(1.0), (6.0, 4.0, 0.1875))\"];",
+            "  n7 -> n8 [label=\"Weld(Circle(1.0), (6.0, 4.0, 0.1875))\"];",
+            "}",
+        ], '\n') * '\n'
+        @test to_dot(weld_g) == expected_weld_dot
+
+        # Diamond DAG with shared ancestor and duplicate parent part
+        forked = fork_parts()
+        diamond_weld = weld(
+            forked.a,
+            Datum(Translation(3.0, 0.0, 0.0) ∘ LinearMap(RotZ(π / 2))),
+            forked.b,
+            Datum(LinearMap(RotZ(π / 2))),
+            LineSegment(3.0),
+        )
+        diamond_g = ManufacturingGraph(diamond_weld)
+        @test diamond_g.nodes == AbstractPart[forked.stick, forked.blank, forked.a, forked.b, diamond_weld]
+        diamond_dot = to_dot(diamond_g)
+        @test count(==("  n2 -> n4 [label=\"Weld(LineSegment(3.0), (3.0, 0.0, 0.0))\"];"), split(chomp(diamond_dot), '\n')) == 1
+        @test count(==("  n3 -> n4 [label=\"Weld(LineSegment(3.0), (3.0, 0.0, 0.0))\"];"), split(chomp(diamond_dot), '\n')) == 1
+
+        same_weld = weld(
+            forked.a,
+            Datum(Translation(3.0, 0.0, 0.0) ∘ LinearMap(RotZ(π / 2))),
+            forked.a,
+            Datum(LinearMap(RotZ(π / 2))),
+            LineSegment(3.0),
+        )
+        same_dot = to_dot(ManufacturingGraph(same_weld))
+        @test count(==("  n2 -> n3 [label=\"Weld(LineSegment(3.0), (3.0, 0.0, 0.0))\"];"), split(chomp(same_dot), '\n')) == 1
     end
 end

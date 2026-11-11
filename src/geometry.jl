@@ -1,67 +1,28 @@
-const _CIRCLE_SEGMENTS = 32
-
-function _signed_area(loop::AbstractVector{Point2d})
-    n = length(loop)
-    acc = 0.0
-    for i in 1:n
-        p1 = loop[i]
-        p2 = loop[i == n ? 1 : i + 1]
-        acc += p1[1] * p2[2] - p2[1] * p1[2]
-    end
-    return 0.5 * acc
-end
-
-function _rect_loop(x0::Real, y0::Real, x1::Real, y1::Real)
-    return Point2d[
-        Point2d(Float64(x0), Float64(y0)),
-        Point2d(Float64(x1), Float64(y0)),
-        Point2d(Float64(x1), Float64(y1)),
-        Point2d(Float64(x0), Float64(y1)),
-    ]
-end
-
-"""
-    _contour(profile::AbstractProfile) -> Vector{Point2d}
-
-Return a counter-clockwise 2D polygon loop approximating `profile` in its local
-datum XY plane centered at `(0, 0)`.
-"""
-function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
-    r = profile.diameter / 2.0
-    return Point2d[
-        Point2d(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
-        for i in 1:segments
-    ]
-end
-
 function _project_2d(T, u::Point2d)
     p = T(SVector(u[1], u[2], 0.0))
     return Point2d(p[1], p[2])
 end
 
-function _project_hole(op::Drill, onto::Datum)
+function _project_hole(op::Union{Drill,Cut}, onto::Datum)
     T = inv(onto.transform) ∘ op.datum.transform
     loop = [_project_2d(T, u) for u in _contour(op.profile)]
-    _signed_area(loop) < 0.0 && reverse!(loop)
+    _is_ccw(_to_geos_polygon(loop)) || reverse!(loop)
     return loop
-end
-
-function _pierces_face(op::Drill, face::Datum)
-    d = dot(zaxis(op.datum), zaxis(face))
-    return d > 1.0 - _ATOL || (op.penetration isa ThroughAll && d < -1.0 + _ATOL)
 end
 
 function _face_holes(
     part::AbstractPart,
-    face::Datum;
-    y_max::Union{Nothing,Real}=nothing,
+    face::Datum,
+    bounds_poly::Union{Nothing,AbstractVector{Point2d}}=nothing,
 )
     result = Vector{Point2d}[]
-    for op in holes(part)
+    shrunk_bounds =
+        isnothing(bounds_poly) ? nothing : LibGEOS.buffer(_to_geos_polygon(bounds_poly), -_ATOL)
+    for op in operations_of_type(Union{Drill,Cut}, part)
         _pierces_face(op, face) || continue
         loop = _project_hole(op, face)
-        if !isnothing(y_max)
-            all(p -> 0.0 < p[2] < y_max, loop) || continue
+        if !isnothing(shrunk_bounds)
+            LibGEOS.contains(shrunk_bounds, _to_geos_polygon(loop)) || continue
         end
         push!(result, loop)
     end
@@ -215,29 +176,105 @@ function _add_slab!(
     return nothing
 end
 
+function _add_annular_cap!(
+    b::_MeshBuilder,
+    outer_v::AbstractVector{Int},
+    inner_v::AbstractVector{Int};
+    flip::Bool=false,
+)
+    n = length(outer_v)
+    for i in 1:n
+        j = i == n ? 1 : i + 1
+        vo1, vo2 = outer_v[i], outer_v[j]
+        vi1, vi2 = inner_v[i], inner_v[j]
+        if flip
+            push!(b.faces, TriangleFace{Int}(vo1, vi2, vo2))
+            push!(b.faces, TriangleFace{Int}(vo1, vi1, vi2))
+        else
+            push!(b.faces, TriangleFace{Int}(vo1, vo2, vi2))
+            push!(b.faces, TriangleFace{Int}(vo1, vi2, vi1))
+        end
+    end
+    return nothing
+end
+
 """
     derive_mesh(part::RectangularTube) -> GeometryBasics.Mesh
 
 Derive a closed, watertight 3D triangle mesh for `part` from its dimensions and
-the `Drill` operations in its manufacturing history.
+the `Saw`, `Drill`, and `Cut` operations in its manufacturing history.
 """
 function derive_mesh(part::RectangularTube)
     b = _MeshBuilder()
     t = part.thickness
     for face in datums(part)
         w = _face_width(part, face)
-        outer_rect = _rect_loop(0.0, 0.0, w, part.length)
-        inner_rect = _rect_loop(t, 0.0, w - t, part.length)
-        wall_holes = _face_holes(part, face; y_max=part.length)
-        _add_slab!(b, face, outer_rect, inner_rect, wall_holes, t)
+        p_out_0 = face.transform(SVector(0.0, 0.0, 0.0))
+        p_out_w = face.transform(SVector(w, 0.0, 0.0))
+        zb_out_0, zt_out_0 = _tube_z_bounds(part, p_out_0[1], p_out_0[2])
+        zb_out_w, zt_out_w = _tube_z_bounds(part, p_out_w[1], p_out_w[2])
+        outer_wall = Point2d[
+            Point2d(0.0, zb_out_0),
+            Point2d(w,   zb_out_w),
+            Point2d(w,   zt_out_w),
+            Point2d(0.0, zt_out_0),
+        ]
+
+        p_in_0 = face.transform(SVector(t, 0.0, -t))
+        p_in_w = face.transform(SVector(w - t, 0.0, -t))
+        zb_in_0, zt_in_0 = _tube_z_bounds(part, p_in_0[1], p_in_0[2])
+        zb_in_w, zt_in_w = _tube_z_bounds(part, p_in_w[1], p_in_w[2])
+        inner_wall = Point2d[
+            Point2d(t,     zb_in_0),
+            Point2d(w - t, zb_in_w),
+            Point2d(w - t, zt_in_w),
+            Point2d(t,     zt_in_0),
+        ]
+
+        wall_holes = _face_holes(part, face, inner_wall)
+        _add_slab!(b, face, outer_wall, inner_wall, wall_holes, t)
     end
 
-    cap_datum = Datum(Translation(0.0, 0.0, 0.0) ∘ LinearMap(RotX(0.0)))
     cap_outer = _rect_loop(0.0, 0.0, part.width, part.height)
-    cap_cavity = [_rect_loop(t, t, part.width - t, part.height - t)]
-    _add_planar_face!(b, cap_datum, cap_outer, cap_cavity; z=0.0, flip=true)
-    _add_planar_face!(b, cap_datum, cap_outer, cap_cavity; z=part.length, flip=false)
+    cap_inner = _rect_loop(t, t, part.width - t, part.height - t)
+    v_ob = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in cap_outer]
+    v_ot = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in cap_outer]
+    v_ib = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in cap_inner]
+    v_it = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in cap_inner]
+    _add_annular_cap!(b, v_ob, v_ib; flip=true)
+    _add_annular_cap!(b, v_ot, v_it; flip=false)
 
+    return Mesh(b.points, b.faces)
+end
+
+"""
+    derive_mesh(part::RoundTube) -> GeometryBasics.Mesh
+
+Derive a closed, watertight 3D triangle mesh for `part` from its outer diameter,
+wall thickness, and the `Saw` operations in its manufacturing history, with the
+tube axis along `+Z` centered at `(x, y) = (0, 0)`.
+"""
+function derive_mesh(part::RoundTube)
+    b = _MeshBuilder()
+    outer = _contour(Circle(part.outer_diameter))
+    inner = _contour(Circle(part.outer_diameter - 2.0 * part.thickness))
+    n = length(outer)
+
+    v_ob = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in outer]
+    v_ot = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in outer]
+    v_ib = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[1])) for p in inner]
+    v_it = [_vertex!(b, SVector(p[1], p[2], _tube_z_bounds(part, p[1], p[2])[2])) for p in inner]
+
+    for i in 1:n
+        j = i == n ? 1 : i + 1
+        push!(b.faces, TriangleFace{Int}(v_ot[i], v_ob[j], v_ot[j]))
+        push!(b.faces, TriangleFace{Int}(v_ot[i], v_ob[i], v_ob[j]))
+        push!(b.faces, TriangleFace{Int}(v_it[i], v_it[j], v_ib[j]))
+        push!(b.faces, TriangleFace{Int}(v_it[i], v_ib[j], v_ib[i]))
+    end
+
+    _add_annular_cap!(b, v_ot, v_it; flip=false)
+    _add_annular_cap!(b, v_ob, v_ib; flip=true)
     return Mesh(b.points, b.faces)
 end
 
@@ -245,25 +282,34 @@ end
     derive_mesh(part::Plate) -> GeometryBasics.Mesh
 
 Derive a closed, watertight 3D triangle mesh for `part` from its dimensions and
-the `Drill` operations in its manufacturing history.
+the `Saw`, `Drill`, and `Cut` operations in its manufacturing history.
 """
 function derive_mesh(part::Plate)
     b = _MeshBuilder()
     top = datum(part, SVector(0, 0, 1))
-    outer = _rect_loop(0.0, 0.0, part.width, part.height)
+    outer_poly = _plate_polygon(part)
+    shrunk_outer = LibGEOS.buffer(outer_poly, -_ATOL)
+    outer = _from_geos_polygon(outer_poly)
     through_holes = Vector{Point2d}[]
     front_blind = Tuple{Vector{Point2d},Float64}[]
     back_blind = Tuple{Vector{Point2d},Float64}[]
 
-    for op in holes(part)
-        loop = _project_hole(op, top)
-        if op.penetration isa Blind
-            if dot(zaxis(op.datum), zaxis(top)) > 0.0
-                push!(front_blind, (loop, op.penetration.depth))
+    for op in operations(part)
+        if op isa Drill
+            loop = _project_hole(op, top)
+            LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
+            if op.penetration isa Blind
+                if dot(zaxis(op.datum), zaxis(top)) > 0.0
+                    push!(front_blind, (loop, op.penetration.depth))
+                else
+                    push!(back_blind, (loop, op.penetration.depth))
+                end
             else
-                push!(back_blind, (loop, op.penetration.depth))
+                push!(through_holes, loop)
             end
-        else
+        elseif op isa Cut
+            loop = _project_hole(op, top)
+            LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
             push!(through_holes, loop)
         end
     end
@@ -280,4 +326,39 @@ function derive_mesh(part::Plate)
         back_blind=back_blind,
     )
     return Mesh(b.points, b.faces)
+end
+
+"""
+    derive_mesh(part::Weldment) -> GeometryBasics.Mesh
+
+Derive a 3D triangle mesh for `part` by combining `derive_mesh(part.parent[1])`
+in `part`'s coordinate frame with `derive_mesh(part.parent[2])` transformed by
+`_weld_transform(part.op)`.
+"""
+function derive_mesh(part::Weldment)
+    pts = Point3d[]
+    fcs = TriangleFace{Int}[]
+    T_b = _weld_transform(part.op)
+    for (subpart, transform) in (
+        part.parent[1] => IdentityRigidTransform,
+        part.parent[2] => T_b,
+    )
+        submesh = derive_mesh(subpart)
+        offset = length(pts)
+        for p in coordinates(submesh)
+            tp = transform(SVector(p[1], p[2], p[3]))
+            push!(pts, Point3d(tp[1], tp[2], tp[3]))
+        end
+        for f in faces(submesh)
+            push!(
+                fcs,
+                TriangleFace{Int}(
+                    Int(f[1]) + offset,
+                    Int(f[2]) + offset,
+                    Int(f[3]) + offset,
+                ),
+            )
+        end
+    end
+    return Mesh(pts, fcs)
 end
