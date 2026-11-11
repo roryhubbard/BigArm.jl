@@ -541,15 +541,15 @@ function _seam_on_part(part::RoundTube, datum::CylindricalDatum, profile::Circle
     return true
 end
 
-_seam_on_part(::AbstractPart, ::AbstractDatum, ::Union{LineSegment,Circle}) = false
-
 # Relative rigid transform placing `part_b` into `part_a`'s frame by gluing `datum_b` onto `datum_a`.
 _weld_transform(op::Weld) = op.datum_a.frame ∘ inv(op.datum_b.frame)
 
 function _seam_on_part(part::Weldment, datum::AbstractDatum, profile::Union{LineSegment,Circle})
-    T_a_b = _weld_transform(part.op)
-    return _seam_on_part(part.parent[1], datum, profile) ||
-           _seam_on_part(part.parent[2], _transform_datum(inv(T_a_b), datum), profile)
+    p1, p2 = part.parent
+    d2 = _transform_datum(inv(_weld_transform(part.op)), datum)
+    on_p1 = applicable(_seam_on_part, p1, datum, profile) && _seam_on_part(p1, datum, profile)
+    on_p2 = applicable(_seam_on_part, p2, d2, profile) && _seam_on_part(p2, d2, profile)
+    return on_p1 || on_p2
 end
 
 """

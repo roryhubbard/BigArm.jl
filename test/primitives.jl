@@ -498,5 +498,8 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError weld(plate, Datum(), blank, Datum(), SquareProfile())
         @test_throws MethodError weld(plate, Datum(), blank, Datum(), Rectangle(1.0, 1.0))
         @test_throws MethodError weld(plate, Datum(), blank, Datum(), 3.0)
+        @test_throws MethodError weld(plate, dp, round_blank, Datum(Translation(0.0, 0.0, 10.0)), Circle(1.0))
+        @test_throws MethodError weld(plate, dp, round_blank, CylindricalDatum(Translation(0.0, 0.0, 10.0)), LineSegment(1.0))
+        @test_throws MethodError weld(plate, CylindricalDatum(), blank, Datum(), LineSegment(1.0))
     end
 end

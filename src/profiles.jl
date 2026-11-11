@@ -53,14 +53,16 @@ function _to_geos_polygon(outline::AbstractVector{Point2d})
 end
 
 _is_ccw(poly::LibGEOS.Polygon) =
-    LibGEOS.isCCW(LibGEOS.getCoordSeq(LibGEOS.exteriorRing(poly)))
+    GC.@preserve poly LibGEOS.isCCW(LibGEOS.getCoordSeq(LibGEOS.exteriorRing(poly)))
 
 function _from_geos_polygon(poly::LibGEOS.Polygon)
-    seq = LibGEOS.getCoordSeq(LibGEOS.exteriorRing(poly))
-    coords = LibGEOS.getCoordinates(seq)
-    pts = Point2d[Point2d(c[1], c[2]) for c in @view coords[1:(end - 1)]]
-    LibGEOS.isCCW(seq) || reverse!(pts)
-    return pts
+    return GC.@preserve poly begin
+        seq = LibGEOS.getCoordSeq(LibGEOS.exteriorRing(poly))
+        coords = LibGEOS.getCoordinates(seq)
+        pts = Point2d[Point2d(c[1], c[2]) for c in @view coords[1:(end - 1)]]
+        LibGEOS.isCCW(seq) || reverse!(pts)
+        pts
+    end
 end
 
 """
