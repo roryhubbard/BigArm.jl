@@ -40,7 +40,7 @@ function build_upright(spec::UprightSpec=UprightSpec())
     upright = blank
     for i in 0:(spec.hole_count - 1)
         y = spec.first_hole_y + i * spec.hole_spacing
-        d = Datum(front.transform ∘ Translation(center_x, y, 0.0))
+        d = Datum(front.frame ∘ Translation(center_x, y, 0.0))
         upright = drill(upright, hole, d, ThroughAll())
     end
     return upright

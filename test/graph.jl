@@ -2,7 +2,7 @@ using CoordinateTransformations: Translation
 using StaticArrays: SVector
 
 place(d::Datum, x::Real, y::Real, z::Real=0.0) =
-    Datum(d.transform ∘ Translation(SVector{3,Float64}(x, y, z)))
+    Datum(d.frame ∘ Translation(SVector{3,Float64}(x, y, z)))
 
 function chain_parts()
     stick = RectangularTube(3.0, 3.0, 288.0, 0.120)
@@ -267,12 +267,12 @@ end
             LineSegment(8.0),
         )
         T_plate_h2 = BigArm._weld_transform(operation(w1))
-        d_hole_in_w1 = Datum(T_plate_h2 ∘ place(top, 2.0, 2.0).transform)
+        d_hole_in_w1 = Datum(T_plate_h2 ∘ place(top, 2.0, 2.0).frame)
         weldment = weld(
             w1,
             d_hole_in_w1,
             axle,
-            Datum(Translation(0.0, 0.0, 10.0)),
+            CylindricalDatum(Translation(0.0, 0.0, 10.0)),
             Circle(1.0),
         )
         weld_g = ManufacturingGraph(weldment)

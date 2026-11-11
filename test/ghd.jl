@@ -5,10 +5,11 @@ using MeshCat: MeshCat, Visualizer
 using StaticArrays: SVector
 
 include(joinpath(@__DIR__, "..", "projects", "ghd", "upright.jl"))
-include(joinpath(@__DIR__, "..", "projects", "ghd", "attachment.jl"))
+include(joinpath(@__DIR__, "..", "projects", "ghd", "bolted_arm.jl"))
+include(joinpath(@__DIR__, "..", "projects", "ghd", "echo_ghd.jl"))
 
 function world_hole_datum(transform::RigidTransform, op::Drill)
-    return Datum(transform ∘ op.datum.transform)
+    return Datum(transform ∘ op.datum.frame)
 end
 
 function world_tube_axis_datum(transform::RigidTransform)
@@ -52,7 +53,7 @@ end
     @test_throws ArgumentError drill(
         upright,
         Circle(4.0),
-        Datum(front.transform ∘ Translation(1.5, 51.0, 0.0)),
+        Datum(front.frame ∘ Translation(1.5, 51.0, 0.0)),
         ThroughAll(),
     )
 
@@ -170,7 +171,7 @@ end
     roller = build_foam_roller(spec)
     frame = build_echo_ghd_weldment(spec)
 
-    # Footplate: 24 × 14 × 3/16 in plate with 9.0 × 8.5 in rectangular cutout window
+    # Footplate: 24 × 14 × 3/16 in plate with 9.0 × 6.5 in rectangular cutout window
     @test footplate isa Plate
     @test footplate.width === 24.0
     @test footplate.height === 14.0
@@ -183,7 +184,7 @@ end
     @test hi_fp ≈ SVector(24.0, 14.0, 0.1875) atol = 1e-12
     fp_stats = check_manifold_and_volume(fp_mesh)
     @test fp_stats.euler == 0
-    @test fp_stats.volume ≈ (24.0 * 14.0 - 9.0 * 8.5) * 0.1875 atol = 1e-9
+    @test fp_stats.volume ≈ (24.0 * 14.0 - 9.0 * 6.5) * 0.1875 atol = 1e-9
 
     # Side ear: 2.5 × 8.5 × 3/16 in plate with 4 × 1.0 in through-holes on 2.0 in centers
     @test ear isa Plate
@@ -224,7 +225,7 @@ end
     # Welded steel frame DAG and mesh
     @test frame isa Weldment
     @test operation(frame) isa Weld
-    @test operation(frame).profile === LineSegment(1.0)
+    @test operation(frame).profile === LineSegment(2.0)
     frame_g = ManufacturingGraph(frame)
     @test frame_g.nodes[end] === frame
     @test count(isstock, frame_g.nodes) == 4
@@ -234,19 +235,19 @@ end
     weld_ops = operations_of_type(Weld, frame)
     @test length(weld_ops) == 5
     @test [op.profile for op in weld_ops] == [
-        LineSegment(0.1875),
-        LineSegment(0.1875),
-        Circle(1.0),
-        Circle(1.0),
         LineSegment(1.0),
+        LineSegment(1.0),
+        Circle(1.0),
+        Circle(1.0),
+        LineSegment(2.0),
     ]
     frame_dot = to_dot(frame_g)
     @test occursin("part Weldment", frame_dot)
-    @test occursin("Weld(LineSegment(0.1875), (10.5, 2.75, 0.0))", frame_dot)
-    @test occursin("Weld(LineSegment(0.1875), (13.6875, 2.75, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(1.0), (10.3125, 2.75, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(1.0), (13.5, 2.75, 0.0))", frame_dot)
     @test occursin("Weld(Circle(1.0), (5.0, 1.0, 0.1875))", frame_dot)
     @test occursin("Weld(Circle(1.0), (5.0, 9.5, 0.1875))", frame_dot)
-    @test occursin("Weld(LineSegment(1.0), (12.09375, 1.75, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(2.0), (12.09375, 1.75, 0.0))", frame_dot)
     @test count(line -> occursin("[label=\"Weld(", line), split(chomp(frame_dot), '\n')) == 10
 
     for node in frame_g.nodes
