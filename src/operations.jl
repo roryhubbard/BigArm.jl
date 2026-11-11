@@ -160,19 +160,29 @@ function _tube_z_bounds(part::AbstractTube, x::Real, y::Real)
     return (zb, zt)
 end
 
-_cross_section_points(part::RectangularTube) = (
-    SVector(0.0, 0.0),
-    SVector(part.width, 0.0),
-    SVector(part.width, part.height),
-    SVector(0.0, part.height),
-)
+_cross_section_points(part::RectangularTube) = _rect_loop(0.0, 0.0, part.width, part.height)
+_cross_section_points(part::RoundTube) = _contour(Circle(part.outer_diameter))
 
-function _cross_section_points(part::RoundTube)
-    r = part.outer_diameter / 2.0
-    return [
-        SVector(r * cos(2π * (i - 1) / 32), r * sin(2π * (i - 1) / 32))
-        for i in 1:32
-    ]
+"""
+    _tube_wall_loop(part::RectangularTube, face::Datum, inset::Real=0.0) -> Vector{Point2d}
+
+Return the 4 corners of one flat wall `face` of a `RectangularTube` in `face`'s
+2D coordinates:
+- `inset = 0` gives the **outer** wall surface (`x` from `0` to `w`).
+- `inset = part.thickness` gives the **inner** cavity wall surface (`x` from `t`
+  to `w - t`, stepped `t` inward so its corners meet the adjacent inner walls).
+
+At the left (`x0`) and right (`x1`) edges, `_tube_z_bounds` finds the bottom and
+top heights after any straight or miter `Saw` cuts.
+"""
+function _tube_wall_loop(part::RectangularTube, face::Datum, inset::Real=0.0)
+    d = Float64(inset)
+    x0, x1 = d, _face_width(part, face) - d
+    p0 = face.transform(SVector(x0, 0.0, -d))
+    p1 = face.transform(SVector(x1, 0.0, -d))
+    zb0, zt0 = _tube_z_bounds(part, p0[1], p0[2])
+    zb1, zt1 = _tube_z_bounds(part, p1[1], p1[2])
+    return Point2d[Point2d(x0, zb0), Point2d(x1, zb1), Point2d(x1, zt1), Point2d(x0, zt0)]
 end
 
 # Build a large 2D bounding polygon representing the kept half-plane `{q : dot(q - p0, n) <= 0}`
@@ -200,12 +210,7 @@ end
 # the current outer 2D polygon of the plate.
 function _plate_polygon(part::Plate)
     root = _root_stock(part)
-    poly = _to_geos_polygon(Point2d[
-        Point2d(0.0, 0.0),
-        Point2d(root.width, 0.0),
-        Point2d(root.width, root.height),
-        Point2d(0.0, root.height),
-    ])
+    poly = _to_geos_polygon(_rect_loop(0.0, 0.0, root.width, root.height))
     for op in operations_of_type(Saw, part)
         poly = LibGEOS.intersection(poly, _halfplane_polygon(poly, origin(op.datum), zaxis(op.datum)))
     end
@@ -405,9 +410,7 @@ function cut(
 )
     _match_face(part, datum)
     shrunk = LibGEOS.buffer(_plate_polygon(part), -_ATOL)
-    cutout = _to_geos_polygon(Point2d[
-        Point2d(datum.transform(SVector(u[1], u[2], 0.0))[1:2]) for u in profile.points
-    ])
+    cutout = _to_geos_polygon(_project_loop(profile, datum))
     LibGEOS.contains(shrunk, cutout) || throw(
         ArgumentError(
             "Cutout at $(origin(datum)) must lie wholly within plate perimeter",
@@ -469,11 +472,7 @@ function _seam_on_subpart(part::Plate, T_local, profile::Union{LineSegment,Circl
                 any(p -> p[3] <= op.penetration.depth + _ATOL, pts)
             in_depth || continue
         end
-        hole = _to_geos_polygon(Point2d[
-            Point2d(op.datum.transform(SVector(u[1], u[2], 0.0))[1:2])
-            for u in _contour(op.profile)
-        ])
-        poly = LibGEOS.difference(poly, hole)
+        poly = LibGEOS.difference(poly, _to_geos_polygon(_project_loop(op.profile, op.datum)))
     end
 
     on_flat_face = all(p -> abs(p[3]) <= _ATOL, pts) || all(p -> abs(p[3] - t) <= _ATOL, pts)
@@ -530,25 +529,10 @@ function _seam_on_subpart(part::RectangularTube, T_local, profile::Union{LineSeg
         fpts = SVector{3,Float64}[inv(face.transform)(p) for p in pts]
         all(fp -> -t - _ATOL <= fp[3] <= _ATOL, fpts) || continue
 
-        fw = _face_width(part, face)
-        p0 = face.transform(SVector(0.0, 0.0, 0.0))
-        pw = face.transform(SVector(fw, 0.0, 0.0))
-        zb0, zt0 = _tube_z_bounds(part, p0[1], p0[2])
-        zbw, ztw = _tube_z_bounds(part, pw[1], pw[2])
-        wall_poly = _to_geos_polygon(Point2d[
-            Point2d(0.0, zb0),
-            Point2d(fw, zbw),
-            Point2d(fw, ztw),
-            Point2d(0.0, zt0),
-        ])
+        wall_poly = _to_geos_polygon(_tube_wall_loop(part, face))
         for op in operations_of_type(Union{Drill,Cut}, part)
             _pierces_face(op, face) || continue
-            T_face_op = inv(face.transform) ∘ op.datum.transform
-            hole = _to_geos_polygon(Point2d[
-                Point2d(T_face_op(SVector(u[1], u[2], 0.0))[1:2])
-                for u in _contour(op.profile)
-            ])
-            wall_poly = LibGEOS.difference(wall_poly, hole)
+            wall_poly = LibGEOS.difference(wall_poly, _to_geos_polygon(_project_loop(op.profile, op.datum, face)))
         end
 
         on_wall_face = all(fp -> abs(fp[3]) <= _ATOL, fpts) || all(fp -> abs(fp[3] + t) <= _ATOL, fpts)

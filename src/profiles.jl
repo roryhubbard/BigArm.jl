@@ -94,14 +94,7 @@ function Rectangle(width::Real, height::Real)
     h = Float64(height)
     w > 0.0 || throw(DomainError(width, "Rectangle width must be positive"))
     h > 0.0 || throw(DomainError(height, "Rectangle height must be positive"))
-    hw = w / 2.0
-    hh = h / 2.0
-    return Polygon(Point2d[
-        Point2d(-hw, -hh),
-        Point2d( hw, -hh),
-        Point2d( hw,  hh),
-        Point2d(-hw,  hh),
-    ])
+    return Polygon(_rect_loop(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0))
 end
 
 """
@@ -119,3 +112,17 @@ function _contour(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
 end
 
 _contour(profile::Polygon) = profile.points
+
+"""
+    _project_loop(profile::AbstractProfile, from::Datum, onto::Datum=Datum()) -> Vector{Point2d}
+
+Project `_contour(profile)` from `from`'s local XY plane onto `onto`'s XY plane
+(via `inv(onto.transform) ∘ from.transform`) and normalize to counter-clockwise
+2D winding order.
+"""
+function _project_loop(profile::AbstractProfile, from::Datum, onto::Datum=Datum())
+    T_onto_from = inv(onto.transform) ∘ from.transform
+    loop = Point2d[Point2d(T_onto_from(SVector(u[1], u[2], 0.0))[1:2]) for u in _contour(profile)]
+    _is_ccw(_to_geos_polygon(loop)) || reverse!(loop)
+    return loop
+end

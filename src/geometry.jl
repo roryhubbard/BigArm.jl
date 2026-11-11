@@ -1,29 +1,14 @@
-function _project_2d(T, u::Point2d)
-    p = T(SVector(u[1], u[2], 0.0))
-    return Point2d(p[1], p[2])
-end
-
-function _project_hole(op::Union{Drill,Cut}, onto::Datum)
-    T = inv(onto.transform) ∘ op.datum.transform
-    loop = [_project_2d(T, u) for u in _contour(op.profile)]
-    _is_ccw(_to_geos_polygon(loop)) || reverse!(loop)
-    return loop
-end
-
 function _face_holes(
     part::AbstractPart,
     face::Datum,
-    bounds_poly::Union{Nothing,AbstractVector{Point2d}}=nothing,
+    bounds_poly::AbstractVector{Point2d},
 )
     result = Vector{Point2d}[]
-    shrunk_bounds =
-        isnothing(bounds_poly) ? nothing : LibGEOS.buffer(_to_geos_polygon(bounds_poly), -_ATOL)
+    shrunk_bounds = LibGEOS.buffer(_to_geos_polygon(bounds_poly), -_ATOL)
     for op in operations_of_type(Union{Drill,Cut}, part)
         _pierces_face(op, face) || continue
-        loop = _project_hole(op, face)
-        if !isnothing(shrunk_bounds)
-            LibGEOS.contains(shrunk_bounds, _to_geos_polygon(loop)) || continue
-        end
+        loop = _project_loop(op.profile, op.datum, face)
+        LibGEOS.contains(shrunk_bounds, _to_geos_polygon(loop)) || continue
         push!(result, loop)
     end
     return result
@@ -67,11 +52,11 @@ function _triangulate_2d(
     end
 
     triin = TriangulateIO()
-    triin.pointlist = [j == 1 ? p[1] : p[2] for j in 1:2, p in pts]
-    triin.segmentlist = [j == 1 ? s[1] : s[2] for j in 1:2, s in segs]
+    triin.pointlist = [p[j] for j in 1:2, p in pts]
+    triin.segmentlist = [s[j] for j in 1:2, s in segs]
     if !isempty(hole_loops)
         seeds = [sum(loop) / length(loop) for loop in hole_loops]
-        triin.holelist = [j == 1 ? c[1] : c[2] for j in 1:2, c in seeds]
+        triin.holelist = [c[j] for j in 1:2, c in seeds]
     end
 
     triout, _ = triangulate("pQY", triin)
@@ -247,29 +232,8 @@ function derive_mesh(part::RectangularTube)
     b = _MeshBuilder()
     t = part.thickness
     for face in datums(part)
-        w = _face_width(part, face)
-        p_out_0 = face.transform(SVector(0.0, 0.0, 0.0))
-        p_out_w = face.transform(SVector(w, 0.0, 0.0))
-        zb_out_0, zt_out_0 = _tube_z_bounds(part, p_out_0[1], p_out_0[2])
-        zb_out_w, zt_out_w = _tube_z_bounds(part, p_out_w[1], p_out_w[2])
-        outer_wall = Point2d[
-            Point2d(0.0, zb_out_0),
-            Point2d(w,   zb_out_w),
-            Point2d(w,   zt_out_w),
-            Point2d(0.0, zt_out_0),
-        ]
-
-        p_in_0 = face.transform(SVector(t, 0.0, -t))
-        p_in_w = face.transform(SVector(w - t, 0.0, -t))
-        zb_in_0, zt_in_0 = _tube_z_bounds(part, p_in_0[1], p_in_0[2])
-        zb_in_w, zt_in_w = _tube_z_bounds(part, p_in_w[1], p_in_w[2])
-        inner_wall = Point2d[
-            Point2d(t,     zb_in_0),
-            Point2d(w - t, zb_in_w),
-            Point2d(w - t, zt_in_w),
-            Point2d(t,     zt_in_0),
-        ]
-
+        outer_wall = _tube_wall_loop(part, face)
+        inner_wall = _tube_wall_loop(part, face, t)
         wall_holes = _face_holes(part, face, inner_wall)
         _add_slab!(b, face, outer_wall, inner_wall, wall_holes, t)
     end
@@ -317,22 +281,13 @@ function derive_mesh(part::Plate)
     front_blind = Tuple{Vector{Point2d},Float64}[]
     back_blind = Tuple{Vector{Point2d},Float64}[]
 
-    for op in operations(part)
-        if op isa Drill
-            loop = _project_hole(op, top)
-            LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
-            if op.penetration isa Blind
-                if dot(zaxis(op.datum), zaxis(top)) > 0.0
-                    push!(front_blind, (loop, op.penetration.depth))
-                else
-                    push!(back_blind, (loop, op.penetration.depth))
-                end
-            else
-                push!(through_holes, loop)
-            end
-        elseif op isa Cut
-            loop = _project_hole(op, top)
-            LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
+    for op in operations_of_type(Union{Drill,Cut}, part)
+        loop = _project_loop(op.profile, op.datum, top)
+        LibGEOS.contains(shrunk_outer, _to_geos_polygon(loop)) || continue
+        if op isa Drill && op.penetration isa Blind
+            target = dot(zaxis(op.datum), zaxis(top)) > 0.0 ? front_blind : back_blind
+            push!(target, (loop, op.penetration.depth))
+        else
             push!(through_holes, loop)
         end
     end
