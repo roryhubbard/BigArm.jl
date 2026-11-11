@@ -511,17 +511,21 @@ function _seam_on_part(
     return false
 end
 
-function _seam_on_part(part::RoundTube, datum::Datum, profile::Union{LineSegment,Circle})
-    z0 = origin(datum)[3]
-    face = Datum(Translation(0.0, 0.0, z0))
-    outer = _outline(Circle(part.outer_diameter))
-    for p in outer
-        zb, zt = _tube_z_bounds(part, p[1], p[2])
-        zb - _ATOL <= z0 <= zt + _ATOL || return false
+function _seam_on_part(part::RoundTube, datum::Datum, profile::Circle)
+    p0 = origin(datum)
+    # Circle center must lie on the tube's Z centerline (x = 0, y = 0).
+    hypot(p0[1], p0[2]) <= _ATOL || return false
+    # Circle plane must be perpendicular to the tube axis (normal along +Z).
+    dot(zaxis(datum), SVector(0.0, 0.0, 1.0)) > 1.0 - _ATOL || return false
+    # Circle diameter must match the outer diameter of the tube wall.
+    abs(profile.diameter - part.outer_diameter) <= _ATOL || return false
+    # Circle height z0 must lie between the bottom and top sawn ends of the tube.
+    r = part.outer_diameter / 2.0
+    for (x, y) in ((r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r))
+        zb, zt = _tube_z_bounds(part, x, y)
+        zb - _ATOL <= p0[3] <= zt + _ATOL || return false
     end
-    inner = _outline(Circle(part.outer_diameter - 2.0 * part.thickness))
-    annulus = LibGEOS.difference(_to_geos_polygon(outer), _to_geos_polygon(inner))
-    return _seam_on_face(annulus, face, datum, profile)
+    return true
 end
 
 # Relative rigid transform placing `part_b` into `part_a`'s frame by gluing `datum_b` onto `datum_a`.
