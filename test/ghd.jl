@@ -5,7 +5,8 @@ using MeshCat: MeshCat, Visualizer
 using StaticArrays: SVector
 
 include(joinpath(@__DIR__, "..", "projects", "ghd", "upright.jl"))
-include(joinpath(@__DIR__, "..", "projects", "ghd", "attachment.jl"))
+include(joinpath(@__DIR__, "..", "projects", "ghd", "bolted_arm.jl"))
+include(joinpath(@__DIR__, "..", "projects", "ghd", "echo_ghd.jl"))
 
 function world_hole_datum(transform::RigidTransform, op::Drill)
     return Datum(transform ∘ op.datum.transform)

@@ -55,7 +55,10 @@ export AbstractPart,
     derive_mesh,
     visualize
 
-include("primitives.jl")
+include("datums.jl")
+include("profiles.jl")
+include("parts.jl")
+include("operations.jl")
 include("graph.jl")
 include("geometry.jl")
 include("visualization.jl")
