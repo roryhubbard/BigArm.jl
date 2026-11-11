@@ -17,7 +17,7 @@ struct LineSegment <: AbstractProfile
 
     function LineSegment(length::Real)
         l = Float64(length)
-        l > 0.0 || throw(DomainError(length, "LineSegment length must be positive"))
+        ispositive(l) || throw(DomainError(length, "LineSegment length must be positive"))
         return new(l)
     end
 end
@@ -32,7 +32,7 @@ struct Circle <: AbstractProfile
 
     function Circle(diameter::Real)
         d = Float64(diameter)
-        d > 0.0 || throw(DomainError(diameter, "Circle diameter must be positive"))
+        ispositive(d) || throw(DomainError(diameter, "Circle diameter must be positive"))
         return new(d)
     end
 end
@@ -92,8 +92,8 @@ Convenience constructor returning a centered `width × height` rectangular
 function Rectangle(width::Real, height::Real)
     w = Float64(width)
     h = Float64(height)
-    w > 0.0 || throw(DomainError(width, "Rectangle width must be positive"))
-    h > 0.0 || throw(DomainError(height, "Rectangle height must be positive"))
+    ispositive(w) || throw(DomainError(width, "Rectangle width must be positive"))
+    ispositive(h) || throw(DomainError(height, "Rectangle height must be positive"))
     return Polygon(_rect_outline(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0))
 end
 

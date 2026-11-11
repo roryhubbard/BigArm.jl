@@ -86,8 +86,8 @@ function _profile_label(profile::Polygon)
     if length(pts) == 4
         w = pts[2][1] - pts[1][1]
         h = pts[3][2] - pts[2][2]
-        if w > 0.0 &&
-           h > 0.0 &&
+        if ispositive(w) &&
+           ispositive(h) &&
            pts == Point2d[
                Point2d(-w / 2.0, -h / 2.0),
                Point2d( w / 2.0, -h / 2.0),

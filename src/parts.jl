@@ -52,10 +52,10 @@ struct RectangularTube <: AbstractTube
         h = Float64(height)
         l = Float64(length)
         t = Float64(thickness)
-        w > 0.0 || throw(DomainError(width, "RectangularTube width must be positive"))
-        h > 0.0 || throw(DomainError(height, "RectangularTube height must be positive"))
-        l > 0.0 || throw(DomainError(length, "RectangularTube length must be positive"))
-        t > 0.0 || throw(DomainError(thickness, "RectangularTube thickness must be positive"))
+        ispositive(w) || throw(DomainError(width, "RectangularTube width must be positive"))
+        ispositive(h) || throw(DomainError(height, "RectangularTube height must be positive"))
+        ispositive(l) || throw(DomainError(length, "RectangularTube length must be positive"))
+        ispositive(t) || throw(DomainError(thickness, "RectangularTube thickness must be positive"))
         2.0 * t < min(w, h) || throw(
             ArgumentError("RectangularTube thickness ($t) must be strictly less than half of width ($w) and height ($h)"),
         )
@@ -92,9 +92,9 @@ struct RoundTube <: AbstractTube
         od = Float64(outer_diameter)
         l = Float64(length)
         t = Float64(thickness)
-        od > 0.0 || throw(DomainError(outer_diameter, "RoundTube outer_diameter must be positive"))
-        l > 0.0 || throw(DomainError(length, "RoundTube length must be positive"))
-        t > 0.0 || throw(DomainError(thickness, "RoundTube thickness must be positive"))
+        ispositive(od) || throw(DomainError(outer_diameter, "RoundTube outer_diameter must be positive"))
+        ispositive(l) || throw(DomainError(length, "RoundTube length must be positive"))
+        ispositive(t) || throw(DomainError(thickness, "RoundTube thickness must be positive"))
         2.0 * t < od || throw(
             ArgumentError("RoundTube thickness ($t) must be strictly less than half of outer_diameter ($od)"),
         )
@@ -131,9 +131,9 @@ struct Plate <: AbstractPart
         w = Float64(width)
         h = Float64(height)
         t = Float64(thickness)
-        w > 0.0 || throw(DomainError(width, "Plate width must be positive"))
-        h > 0.0 || throw(DomainError(height, "Plate height must be positive"))
-        t > 0.0 || throw(DomainError(thickness, "Plate thickness must be positive"))
+        ispositive(w) || throw(DomainError(width, "Plate width must be positive"))
+        ispositive(h) || throw(DomainError(height, "Plate height must be positive"))
+        ispositive(t) || throw(DomainError(thickness, "Plate thickness must be positive"))
         isnothing(parent) == isnothing(op) || throw(
             ArgumentError("Plate parent and op must either both be nothing (raw stock) or both be present"),
         )

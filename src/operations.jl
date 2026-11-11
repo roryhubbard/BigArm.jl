@@ -31,7 +31,7 @@ struct Blind <: AbstractPenetration
 
     function Blind(depth::Real)
         d = Float64(depth)
-        d > 0.0 || throw(DomainError(depth, "Blind depth must be positive"))
+        ispositive(d) || throw(DomainError(depth, "Blind depth must be positive"))
         return new(d)
     end
 end
@@ -128,7 +128,12 @@ function _root_stock(part::AbstractPart)
     return curr
 end
 
-# Evaluate the Z height where `datum`'s XY plane intersects the vertical line at (x, y).
+"""
+    _plane_z(datum::Datum, x::Real, y::Real) -> Float64
+
+Return the `z` coordinate on `datum`'s XY plane at `(x, y)` by solving the plane
+equation `dot([x, y, z] - origin(datum), zaxis(datum)) = 0` for `z`.
+"""
 function _plane_z(datum::Datum, x::Real, y::Real)
     p0 = origin(datum)
     n = zaxis(datum)
@@ -170,21 +175,29 @@ function operations_of_type(::Type{T}, part::AbstractPart) where {T<:AbstractOpe
     return result
 end
 
-# Compute the active (z_bottom, z_top) axial bounds of `part` along the vertical line (x, y)
-# after applying all `Saw` operations in its history (each keeping the `-zaxis` half-space).
+"""
+    _tube_z_bounds(part::AbstractTube, x::Real, y::Real) -> Pair{Float64,Float64}
+
+Return the `z_bottom => z_top` axial bounds of `part` at cross-section coordinates
+`(x, y)` after applying all `Saw` operations in its history (each keeping the
+`-zaxis(op.datum)` half-space).
+"""
 function _tube_z_bounds(part::AbstractTube, x::Real, y::Real)
     root = _root_stock(part)
     zb = 0.0
     zt = root.length
     for op in operations_of_type(Saw, part)
         zp = _plane_z(op.datum, x, y)
-        if zaxis(op.datum)[3] > 0.0
+        # `Saw` keeps the `-zaxis` side of the cut plane (`zaxis` is the outward normal of the new end):
+        # - Upward normal (`z > 0`) keeps material below `zp`, trimming the top bound `zt`.
+        # - Downward normal (`z < 0`) keeps material above `zp`, trimming the bottom bound `zb`.
+        if ispositive(zaxis(op.datum)[3])
             zt = min(zt, zp)
         else
             zb = max(zb, zp)
         end
     end
-    return (zb, zt)
+    return zb => zt
 end
 
 _cross_section_points(part::RectangularTube) = _rect_outline(0.0, 0.0, part.width, part.height)

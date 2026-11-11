@@ -285,7 +285,7 @@ function derive_mesh(part::Plate)
         outline = _project_outline(op.profile, op.datum, top)
         LibGEOS.contains(shrunk_outer, _to_geos_polygon(outline)) || continue
         if op isa Drill && op.penetration isa Blind
-            target = dot(zaxis(op.datum), zaxis(top)) > 0.0 ? front_blind : back_blind
+            target = ispositive(dot(zaxis(op.datum), zaxis(top))) ? front_blind : back_blind
             push!(target, (outline, op.penetration.depth))
         else
             push!(through_holes, outline)
