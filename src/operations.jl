@@ -431,115 +431,132 @@ _pierces_face(op::Cut, face::Datum) = dot(zaxis(op.datum), zaxis(face)) > 1.0 - 
 # Return the 3D vertices of a weld seam `profile` in `datum`'s frame:
 # - For `LineSegment(L)`, the two endpoints `(0, 0, 0)` and `(L, 0, 0)` along `+xaxis`.
 # - For `Circle(d)`, the closed 32-segment outline in the datum XY plane.
-function _seam_3d_points(profile::LineSegment, datum::Datum)
+function _seam_points_3d(profile::LineSegment, datum::Datum)
     return SVector{3,Float64}[
         datum.transform(SVector(0.0, 0.0, 0.0)),
         datum.transform(SVector(profile.length, 0.0, 0.0)),
     ]
 end
 
-function _seam_3d_points(profile::Circle, datum::Datum)
-    pts = SVector{3,Float64}[datum.transform(SVector(u[1], u[2], 0.0)) for u in _outline(profile)]
-    # Repeat the first vertex at the end so `LibGEOS.LineString` includes the closing segment `pts[end] -> pts[1]`.
-    push!(pts, pts[1])
-    return pts
+function _seam_points_3d(profile::Circle, datum::Datum)
+    pts_3d = SVector{3,Float64}[datum.transform(SVector(u[1], u[2], 0.0)) for u in _outline(profile)]
+    # Repeat the first vertex at the end so `LibGEOS.LineString` includes the closing segment `pts_3d[end] -> pts_3d[1]`.
+    push!(pts_3d, pts_3d[1])
+    return pts_3d
 end
 
 """
-    _covers_seam(poly::LibGEOS.Polygon, pts, on_face::Bool) -> Bool
+    _covers_seam(poly_2d::LibGEOS.Polygon, pts_3d, on_face::Bool) -> Bool
 
-Check whether the 2D projection of seam vertices `pts` is covered (within `_ATOL`)
-by the full 2D polygon `poly` when `on_face=true` (seam lies on a flat face or end cap),
-or by `LibGEOS.boundary(poly)` when `on_face=false` (seam runs along an outer edge or hole rim).
+Check whether the 1D XY projection (`seam_1d`) of 3D seam vertices `pts_3d` is
+covered (within `_ATOL`) by the 2D polygon `poly_2d` when `on_face=true` (seam
+lies on a flat face or end cap), or by its 1D border `LibGEOS.boundary(poly_2d)`
+when `on_face=false` (seam runs along an outer edge or hole rim).
 """
 function _covers_seam(
-    poly::LibGEOS.Polygon,
-    pts::AbstractVector{SVector{3,Float64}},
+    poly_2d::LibGEOS.Polygon,
+    pts_3d::AbstractVector{SVector{3,Float64}},
     on_face::Bool,
 )
-    target = on_face ? poly : LibGEOS.boundary(poly)
-    seam_2d = LibGEOS.LineString(Vector{Float64}[[p[1], p[2]] for p in pts])
-    return LibGEOS.covers(LibGEOS.buffer(target, _ATOL), seam_2d)
+    target = on_face ? poly_2d : LibGEOS.boundary(poly_2d)
+    seam_1d = LibGEOS.LineString(Vector{Float64}[[p[1], p[2]] for p in pts_3d])
+    return LibGEOS.covers(LibGEOS.buffer(target, _ATOL), seam_1d)
 end
 
-function _within_tube_z(part::AbstractTube, pts::AbstractVector{SVector{3,Float64}})
-    return all(pts) do p
+"""
+    _seam_on_slab(poly_2d::LibGEOS.Polygon, pts_3d, z_lo::Real, z_hi::Real) -> Bool
+
+Check whether 3D seam points `pts_3d` lie on the surface of a 2.5D slab with 2D
+footprint `poly_2d` spanning `z ∈ [z_lo, z_hi]`: all points must lie within
+`[z_lo, z_hi]`, and their XY projection must be covered by `poly_2d` when on the
+flat faces (`z ≈ z_lo` or `z ≈ z_hi`) or by `LibGEOS.boundary(poly_2d)` when
+along the side/hole walls.
+"""
+function _seam_on_slab(
+    poly_2d::LibGEOS.Polygon,
+    pts_3d::AbstractVector{SVector{3,Float64}},
+    z_lo::Real,
+    z_hi::Real,
+)
+    all(p -> z_lo - _ATOL <= p[3] <= z_hi + _ATOL, pts_3d) || return false
+    on_face =
+        all(p -> abs(p[3] - z_lo) <= _ATOL, pts_3d) ||
+        all(p -> abs(p[3] - z_hi) <= _ATOL, pts_3d)
+    return _covers_seam(poly_2d, pts_3d, on_face)
+end
+
+function _within_tube_z(part::AbstractTube, pts_3d::AbstractVector{SVector{3,Float64}})
+    return all(pts_3d) do p
         zb, zt = _tube_z_bounds(part, p[1], p[2])
         return zb - _ATOL <= p[3] <= zt + _ATOL
     end
 end
 
-function _on_tube_end_cap(part::AbstractTube, pts::AbstractVector{SVector{3,Float64}})
-    return all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[1]) <= _ATOL, pts) ||
-           all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[2]) <= _ATOL, pts)
+function _on_tube_end_cap(part::AbstractTube, pts_3d::AbstractVector{SVector{3,Float64}})
+    return all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[1]) <= _ATOL, pts_3d) ||
+           all(p -> abs(p[3] - _tube_z_bounds(part, p[1], p[2])[2]) <= _ATOL, pts_3d)
 end
 
 # Validate that `profile` at `datum` lies on the surface of `part::Plate` using `LibGEOS`:
 # subtract all active hole/cutout polygons from `_plate_polygon(part)` via `LibGEOS.difference`,
-# then check `_covers_seam` against the perforated face polygon or its boundary.
+# then check `_seam_on_slab` across `z ∈ [0, thickness]`.
 function _seam_on_part(part::Plate, datum::Datum, profile::Union{LineSegment,Circle})
-    pts = _seam_3d_points(profile, datum)
+    pts_3d = _seam_points_3d(profile, datum)
     t = part.thickness
-    all(p -> -_ATOL <= p[3] <= t + _ATOL, pts) || return false
-
-    poly = _plate_polygon(part)
+    poly_2d = _plate_polygon(part)
     for op in operations_of_type(Union{Drill,Cut}, part)
         if op isa Drill && op.penetration isa Blind
             in_depth =
                 zaxis(op.datum)[3] > 0.0 ?
-                any(p -> p[3] >= t - op.penetration.depth - _ATOL, pts) :
-                any(p -> p[3] <= op.penetration.depth + _ATOL, pts)
+                any(p -> p[3] >= t - op.penetration.depth - _ATOL, pts_3d) :
+                any(p -> p[3] <= op.penetration.depth + _ATOL, pts_3d)
             in_depth || continue
         end
-        poly = LibGEOS.difference(poly, _to_geos_polygon(_project_outline(op.profile, op.datum)))
+        poly_2d = LibGEOS.difference(poly_2d, _to_geos_polygon(_project_outline(op.profile, op.datum)))
     end
 
-    on_flat_face = all(p -> abs(p[3]) <= _ATOL, pts) || all(p -> abs(p[3] - t) <= _ATOL, pts)
-    return _covers_seam(poly, pts, on_flat_face)
+    return _seam_on_slab(poly_2d, pts_3d, 0.0, t)
 end
 
 # Validate that `profile` at `datum` lies on the surface of `part::RoundTube` by constructing
-# the annular cross-section via `LibGEOS.difference(outer_circle, inner_circle)` and checking
-# `_covers_seam` against the annulus (for sawn end caps) or its boundary (for cylindrical walls).
+# the 2D annular cross-section via `LibGEOS.difference(outer_2d, inner_2d)` and checking
+# `_covers_seam` against `annulus_2d` (for sawn end caps) or its 1D boundary (for cylindrical walls).
 function _seam_on_part(part::RoundTube, datum::Datum, profile::Union{LineSegment,Circle})
-    pts = _seam_3d_points(profile, datum)
-    _within_tube_z(part, pts) || return false
+    pts_3d = _seam_points_3d(profile, datum)
+    _within_tube_z(part, pts_3d) || return false
 
-    outer = _to_geos_polygon(_outline(Circle(part.outer_diameter)))
-    inner = _to_geos_polygon(_outline(Circle(part.outer_diameter - 2.0 * part.thickness)))
-    annulus = LibGEOS.difference(outer, inner)
-    return _covers_seam(annulus, pts, _on_tube_end_cap(part, pts))
+    outer_2d = _to_geos_polygon(_outline(Circle(part.outer_diameter)))
+    inner_2d = _to_geos_polygon(_outline(Circle(part.outer_diameter - 2.0 * part.thickness)))
+    annulus_2d = LibGEOS.difference(outer_2d, inner_2d)
+    return _covers_seam(annulus_2d, pts_3d, _on_tube_end_cap(part, pts_3d))
 end
 
 # Validate that `profile` at `datum` lies on the surface of `part::RectangularTube` by checking
 # either the top/bottom sawn annular end caps or any of the 4 perforated tube walls via `LibGEOS`.
 function _seam_on_part(part::RectangularTube, datum::Datum, profile::Union{LineSegment,Circle})
-    pts = _seam_3d_points(profile, datum)
-    _within_tube_z(part, pts) || return false
+    pts_3d = _seam_points_3d(profile, datum)
+    _within_tube_z(part, pts_3d) || return false
     w, h, t = part.width, part.height, part.thickness
 
     # 1. Check top/bottom sawn annular end caps in XY.
-    if _on_tube_end_cap(part, pts)
-        annulus = LibGEOS.difference(
+    if _on_tube_end_cap(part, pts_3d)
+        annulus_2d = LibGEOS.difference(
             _to_geos_polygon(_rect_outline(0.0, 0.0, w, h)),
             _to_geos_polygon(_rect_outline(t, t, w - t, h - t)),
         )
-        _covers_seam(annulus, pts, true) && return true
+        _covers_seam(annulus_2d, pts_3d, true) && return true
     end
 
     # 2. Check each of the 4 tube walls in its local face coordinate frame.
     for face in datums(part)
-        fpts = SVector{3,Float64}[inv(face.transform)(p) for p in pts]
-        all(fp -> -t - _ATOL <= fp[3] <= _ATOL, fpts) || continue
-
-        wall_poly = _to_geos_polygon(_tube_wall_outline(part, face))
+        fpts_3d = SVector{3,Float64}[inv(face.transform)(p) for p in pts_3d]
+        wall_poly_2d = _to_geos_polygon(_tube_wall_outline(part, face))
         for op in operations_of_type(Union{Drill,Cut}, part)
             _pierces_face(op, face) || continue
-            wall_poly = LibGEOS.difference(wall_poly, _to_geos_polygon(_project_outline(op.profile, op.datum, face)))
+            wall_poly_2d = LibGEOS.difference(wall_poly_2d, _to_geos_polygon(_project_outline(op.profile, op.datum, face)))
         end
 
-        on_wall_face = all(fp -> abs(fp[3]) <= _ATOL, fpts) || all(fp -> abs(fp[3] + t) <= _ATOL, fpts)
-        _covers_seam(wall_poly, fpts, on_wall_face) && return true
+        _seam_on_slab(wall_poly_2d, fpts_3d, -t, 0.0) && return true
     end
     return false
 end
