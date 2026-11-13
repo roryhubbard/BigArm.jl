@@ -34,9 +34,10 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test c.diameter === 1.0
 
         rect = Rectangle(9, 8.5)
-        @test rect isa Polygon
+        @test rect isa Rectangle
         @test rect isa AbstractProfile
-        @test length(rect.points) == 4
+        @test rect.width === 9.0
+        @test rect.height === 8.5
 
         tri = Polygon([SVector(-1.0, -1.0), SVector(1.0, -1.0), SVector(0.0, 1.0)])
         @test tri isa Polygon
@@ -334,7 +335,7 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test !isstock(windowed)
         @test parent(windowed) === footplate_stock
         @test operation(windowed) isa Cut
-        @test operation(windowed).profile.points == Rectangle(9.0, 8.5).points
+        @test operation(windowed).profile === Rectangle(9.0, 8.5)
         @test length(operations_of_type(Cut, windowed)) == 1
         @test isempty(operations_of_type(Drill, windowed))
         cut_ops = operations_of_type(Cut, windowed_two)

@@ -59,12 +59,13 @@ struct Drill <: AbstractOperation
 end
 
 """
-    Cut(profile::Polygon, datum::Datum)
+    Cut(profile::Union{Polygon,Rectangle}, datum::Datum)
 
-Profile-cutting operation cutting polygonal `profile` through the wall at `datum`.
+Profile-cutting operation cutting polygonal or rectangular `profile` through
+the wall at `datum`.
 """
 struct Cut <: AbstractOperation
-    profile::Polygon
+    profile::Union{Polygon,Rectangle}
     datum::Datum
 end
 
@@ -407,21 +408,22 @@ function drill(
 end
 
 """
-    cut(part::RectangularTube, profile::Polygon, datum::Datum)
+    cut(part::RectangularTube, profile::Union{Polygon,Rectangle}, datum::Datum)
 
-Cut polygonal `profile` through the wall of `part` at `datum`. Validates that
-`datum` lies on a valid outer face of `part` and that every vertex of `profile`
-fits strictly within the inner cavity width and sawn tube ends.
+Cut polygonal or rectangular `profile` through the wall of `part` at `datum`.
+Validates that `datum` lies on a valid outer face of `part` and that every
+vertex of `profile` fits strictly within the inner cavity width and sawn tube
+ends.
 """
 function cut(
     part::RectangularTube,
-    profile::Polygon,
+    profile::Union{Polygon,Rectangle},
     datum::Datum,
 )
     face, _, _ = _match_face(part, datum)
     face_width = _face_width(part, face)
     T_face_datum = inv(face.frame) ∘ datum.frame
-    for u in profile.points
+    for u in _outline(profile)
         pf = T_face_datum(SVector(u[1], u[2], 0.0))
         (part.thickness < pf[1] && pf[1] < face_width - part.thickness) || throw(
             ArgumentError(
@@ -444,16 +446,17 @@ function cut(
 end
 
 """
-    cut(part::Plate, profile::Polygon, datum::Datum)
+    cut(part::Plate, profile::Union{Polygon,Rectangle}, datum::Datum)
 
-Cut polygonal `profile` through `part`, where `profile` is expressed in the
-coordinate frame of `datum`. Validates that `datum` lies on a valid flat surface
-of `part` and that `profile` either fits strictly within the plate perimeter
-(an interior window) or cleanly notches the plate perimeter without splitting it.
+Cut polygonal or rectangular `profile` through `part`, where `profile` is
+expressed in the coordinate frame of `datum`. Validates that `datum` lies on a
+valid flat surface of `part` and that `profile` either fits strictly within the
+plate perimeter (an interior window) or cleanly notches the plate perimeter
+without splitting it.
 """
 function cut(
     part::Plate,
-    profile::Polygon,
+    profile::Union{Polygon,Rectangle},
     datum::Datum,
 )
     _match_face(part, datum)

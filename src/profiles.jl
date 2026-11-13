@@ -86,17 +86,22 @@ struct Polygon <: AbstractProfile
 end
 
 """
-    Rectangle(width, height) -> Polygon
+    Rectangle(width, height)
 
-Convenience constructor returning a centered `width × height` rectangular
-`Polygon` profile in a `Datum`'s XY plane.
+Centered rectangular 2D cut profile in a `Datum`'s XY plane with positive
+`width` (X) and `height` (Y), in inches (`Float64`).
 """
-function Rectangle(width::Real, height::Real)
-    w = Float64(width)
-    h = Float64(height)
-    ispositive(w) || throw(DomainError(width, "Rectangle width must be positive"))
-    ispositive(h) || throw(DomainError(height, "Rectangle height must be positive"))
-    return Polygon(_rect_outline(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0))
+struct Rectangle <: AbstractProfile
+    width::Float64
+    height::Float64
+
+    function Rectangle(width::Real, height::Real)
+        w = Float64(width)
+        h = Float64(height)
+        ispositive(w) || throw(DomainError(width, "Rectangle width must be positive"))
+        ispositive(h) || throw(DomainError(height, "Rectangle height must be positive"))
+        return new(w, h)
+    end
 end
 
 """
@@ -114,6 +119,9 @@ function _outline(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
         for i in 1:segments
     ]
 end
+
+_outline(profile::Rectangle) =
+    _rect_outline(-profile.width / 2.0, -profile.height / 2.0, profile.width / 2.0, profile.height / 2.0)
 
 _outline(profile::Polygon) = profile.points
 

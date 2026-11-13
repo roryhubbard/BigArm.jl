@@ -80,26 +80,8 @@ end
 
 _profile_label(profile::LineSegment) = "LineSegment($(_fmt(profile.length)))"
 _profile_label(profile::Circle) = "Circle($(_fmt(profile.diameter)))"
-
-function _profile_label(profile::Polygon)
-    pts = profile.points
-    if length(pts) == 4
-        w = pts[2][1] - pts[1][1]
-        h = pts[3][2] - pts[2][2]
-        if ispositive(w) &&
-           ispositive(h) &&
-           pts == Point2d[
-               Point2d(-w / 2.0, -h / 2.0),
-               Point2d( w / 2.0, -h / 2.0),
-               Point2d( w / 2.0,  h / 2.0),
-               Point2d(-w / 2.0,  h / 2.0),
-           ]
-            return "Rectangle($(_fmt(w)), $(_fmt(h)))"
-        end
-    end
-    return "Polygon($(length(pts)))"
-end
-
+_profile_label(profile::Rectangle) = "Rectangle($(_fmt(profile.width)), $(_fmt(profile.height)))"
+_profile_label(profile::Polygon) = "Polygon($(length(profile.points)))"
 _profile_label(profile::AbstractProfile) = string(nameof(typeof(profile)))
 
 function _op_label(op::Cut)
