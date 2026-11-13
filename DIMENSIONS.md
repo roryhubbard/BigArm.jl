@@ -32,14 +32,14 @@ Sources: Rogue Echo GHD product page, Rogue `IS0183` customer instruction sheet 
 | **Pad** | `30.0 in` L × `24.0 in` W × `10.0 in` H | **Published** (Rogue spec) |
 | **Plyo / Games Box** | `30.0 in` L × `24.0 in` W × `20.0 in` H | **Published** (Rogue Games Box) |
 | **Side mounting ears** (`2×`) | `3/16 in` (`0.1875 in`) laser-cut steel | **Published** (Rogue spec) |
-| Side ear outer dimensions | `2.5 in` deep × `8.5 in` tall | **Photo-estimated** (`Echo GHD 3.png`) |
+| Side ear outer dimensions | `2.5 in` deep × `8.5 in` tall (stock); **`2.5 in` deep × `9.5 in` tall** (SM-2.5 adaptation for `1.0 in` holes) | **Photo-estimated** (`Echo GHD 3.png`, `GHD_back_view.png`) |
 | Side ear inside spacing | `3.0 in` (straddles `3×3 in` upright) | **Published** (`3×3` compatibility) |
-| Side ear hole pattern | `7` holes on `1.0 in` centers (`5/8 in` stock Monster Lite); adapted to **`4` holes on `2.0 in` vertical centers** (`y = 1.25:2.0:7.25 in`, `x = 1.5 in` from upright front face) for `1.0 in` SM-2.5 Monster holes | **Photo-estimated** (`Echo GHD 3.png`) / **Inference** (`2.0 in` spacing required so `1.0 in` holes have `1.0 in` web instead of touching) |
+| Side ear hole pattern | `7` holes on `1.0 in` centers (`5/8 in` stock Monster Lite); adapted to **`4` holes on `2.0 in` vertical centers** (`y = 1.75:2.0:7.75 in`, `x = 1.5 in` from upright front face) for `1.0 in` SM-2.5 Monster holes | **Photo-estimated** (`Echo GHD 3.png`, `GHD_back_view.png`) / **Inference** (`2.0 in` spacing required so `1.0 in` holes have `1.0 in` web instead of touching, and all 4 holes sit inside the `7.5 in` window) |
 | Detent pin diameter | `5/8 in` (`0.625 in`) on stock Monster Lite; **`1.0 in`** for SM-2.5 Monster adaptation | **Published** (`IS0183`: `5/8" × 4" Detent Pin`) / **Inference** (`1.0"` for SM-2.5) |
 | **Footplate** (`1×`) | `3/16 in` (`0.1875 in`) steel plate | **Published** (Rogue spec) |
 | Footplate outer dimensions | `24.0 in` wide × `14.0 in` tall | **Photo-estimated** (`Echo GHD 2.png`–`4.png`: ~7 upright hole spaces tall, matches 24 in pad width) |
-| Footplate center cutout window | `9.0 in` wide × `8.5 in` tall (centered horizontally; leaves `3.0 in` upright + `3.0 in` ankle opening on each side, and `2.75 in` top/bottom bridges) | **Photo-estimated** (`Echo GHD 2.png`–`4.png`) |
-| **Central roller standoff web** (`1×`) | `3/16 in` (`0.1875 in`) vertical steel plate | **Photo-estimated** (`Echo GHD 4.png`) |
+| Footplate center cutout window | `9.0 in` wide × `7.5 in` tall (centered horizontally; leaves `3.0 in` upright + `3.0 in` ankle opening on each side, and `3.25 in` top/bottom bridges overlapped by the side ears and central web) | **Photo-estimated** (`Echo GHD 2.png`–`4.png`, `GHD_back_view.png`) |
+| **Central roller standoff web** (`1×`) | `3/16 in` (`0.1875 in`) contoured vertical steel plate (dogbone / sideways-`I` profile with `3.0 in` central neck and `2.0 in` wide front vertical axle post) | **Photo-estimated** (`Echo GHD 4.png`, `GHD_back_view.png`) |
 | Standoff web outer dimensions | `6.0 in` forward projection × `10.5 in` tall | **Photo-estimated** (`Echo GHD 2.png`, `4.png`) |
 | Roller axle center offset | `5.0 in` forward from footplate front face (`8.5 in` vertical center-to-center spacing between upper and lower axles) | **Photo-estimated** (`Echo GHD 3.png`, `4.png`) |
 | **Roller axle shafts** (`2×`) | `1.0 in` OD × `20.0 in` long round steel tube/bar (`11-gauge` ≈ `0.120 in` wall) | **Published** OD (`IS0183` specifies `1" Flat Washers` [8×] and `1-1/16" Shaft Collars` [4×] on the roller shafts) / **Photo-estimated** length (`20.0 in`) |
@@ -118,15 +118,16 @@ Models the exact factory Echo GHD geometry shown in `Echo GHD 2.png`–`4.png`, 
 #### Parts & Transforms in Design B (in Attachment Local Frame, Upright Front Face at `X = 3.0`)
 
 1. **Footplate (`Plate(24.0, 14.0, 0.1875)`)**:
-   - Cut with a centered `Rectangle(9.0, 8.5)` through-window at `(x = 12.0, y = 7.0)`.
+   - Cut with a centered `Rectangle(9.0, 7.5)` through-window at `(x = 12.0, y = 7.0)`.
    - Oriented vertically at `X ∈ [3.0, 3.1875]`, centered on the upright (`Y ∈ [-10.5, 13.5]`, `Z ∈ [mount_z, mount_z + 14.0]`).
-2. **Left & Right Upright Side Ears (`2 × Plate(2.5, 8.5, 0.1875)`)**:
-   - Each drilled with `4` holes (`Circle(1.0)`) on `2.0 in` vertical centers at `x = 1.5 in`, `y = 1.25:2.0:7.25 in`.
-   - Welded to the back of the Footplate at `Y ∈ [-0.1875, 0.0]` and `Y ∈ [3.0, 3.1875]`, spanning `X ∈ [0.5, 3.0]` and `Z ∈ [mount_z + 2.75, mount_z + 11.25]`.
+2. **Left & Right Upright Side Ears (`2 × Plate(2.5, 9.5, 0.1875)`)**:
+   - Each drilled with `4` holes (`Circle(1.0)`) on `2.0 in` vertical centers at `x = 1.5 in`, `y = 1.75:2.0:7.75 in` (all 4 holes inside the `7.5 in` window opening).
+   - Welded to the back of the Footplate (`X = 3.0`) at `Y ∈ [-0.1875, 0.0]` and `Y ∈ [3.0, 3.1875]`, spanning `X ∈ [0.5, 3.0]` and `Z ∈ [mount_z + 2.25, mount_z + 11.75]`.
 3. **Central Roller Standoff Web (`Plate(6.0, 10.5, 0.1875)`)**:
+   - Contoured with top and bottom perimeter cutouts leaving a `1.0 in` rear base, `1.0 in` gusset taper, `3.0 in` tall central horizontal neck, and `2.0 in` wide front vertical axle post.
    - Drilled with `2` axle holes (`Circle(1.0)`) at `x = 5.0 in`, `y = 1.0 in` (lower) and `y = 9.5 in` (upper).
-   - Welded vertically at the center of the upright/footplate (`Y ∈ [1.5 - 0.09375, 1.5 + 0.09375]`), projecting forward along `X ∈ [3.0, 9.0]` and `Z ∈ [mount_z + 1.75, mount_z + 12.25]`.
+   - Welded vertically to the **front** face of the Footplate (`X = 3.1875`) at the center (`Y ∈ [1.5 - 0.09375, 1.5 + 0.09375]`), projecting forward along `X ∈ [3.1875, 9.1875]` and `Z ∈ [mount_z + 1.75, mount_z + 12.25]`.
 4. **Upper & Lower Roller Axle Shafts (`2 × saw(RoundTube(1.0, 240.0, 0.120), 20.0)`)**:
-   - Welded coaxially through the upper and lower `1.0 in` holes of the Central Roller Standoff Web (`X = 8.0 in`, `Z = mount_z + 2.75 in` and `Z = mount_z + 11.25 in`, spanning `Y ∈ [-8.5, 11.5]`).
+   - Welded coaxially through the upper and lower `1.0 in` holes of the Central Roller Standoff Web (`X = 8.1875 in`, `Z = mount_z + 2.75 in` and `Z = mount_z + 11.25 in`, spanning `Y ∈ [-8.5, 11.5]`).
 5. **Four Foam Rollers (`4 × saw(RoundTube(4.5, 96.0, 1.75), 8.0)`)**:
    - Slid coaxially onto the left (`Y ∈ [-8.25, -0.25]`) and right (`Y ∈ [3.25, 11.25]`) sides of the upper and lower axle shafts.

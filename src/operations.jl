@@ -200,7 +200,8 @@ function _tube_z_bounds(part::AbstractTube, x::Real, y::Real)
     return zb => zt
 end
 
-_cross_section_points(part::RectangularTube) = _rect_outline(0.0, 0.0, part.width, part.height)
+_cross_section_points(part::Union{RectangularTube,Plate}) =
+    _rect_outline(0.0, 0.0, part.width, part.height)
 _cross_section_points(part::RoundTube) = _outline(Circle(part.outer_diameter))
 
 """
@@ -246,13 +247,19 @@ function _halfplane_polygon(
     ])
 end
 
-# Replay all `Saw` cuts on `part` starting from the root rectangular stock to obtain
-# the current outer 2D polygon of the plate.
+# Replay all `Saw` cuts and perimeter-notching `Cut` operations on `part` starting
+# from the root rectangular stock to obtain the current outer 2D polygon of the plate.
 function _plate_polygon(part::Plate)
-    root = _root_stock(part)
-    poly = _to_geos_polygon(_rect_outline(0.0, 0.0, root.width, root.height))
-    for op in operations_of_type(Saw, part)
-        poly = LibGEOS.intersection(poly, _halfplane_polygon(poly, origin(op.datum), zaxis(op.datum)))
+    poly = _to_geos_polygon(_cross_section_points(_root_stock(part)))
+    for op in operations_of_type(Union{Saw,Cut}, part)
+        if op isa Saw
+            poly = LibGEOS.intersection(poly, _halfplane_polygon(poly, origin(op.datum), zaxis(op.datum)))
+        else
+            cutout = _to_geos_polygon(_project_outline(op.profile, op.datum))
+            if !LibGEOS.contains(LibGEOS.buffer(poly, -_ATOL), cutout)
+                poly = LibGEOS.difference(poly, cutout)
+            end
+        end
     end
     return poly
 end
@@ -441,7 +448,8 @@ end
 
 Cut polygonal `profile` through `part`, where `profile` is expressed in the
 coordinate frame of `datum`. Validates that `datum` lies on a valid flat surface
-of `part` and that `profile` fits strictly within the plate perimeter.
+of `part` and that `profile` either fits strictly within the plate perimeter
+(an interior window) or cleanly notches the plate perimeter without splitting it.
 """
 function cut(
     part::Plate,
@@ -449,13 +457,34 @@ function cut(
     datum::Datum,
 )
     _match_face(part, datum)
-    shrunk = LibGEOS.buffer(_plate_polygon(part), -_ATOL)
+    poly = _plate_polygon(part)
+    # Inset and outset `poly` by `_ATOL` so boundary-containment checks have a
+    # tolerance band around the plate's outer edges.
+    shrunk = LibGEOS.buffer(poly, -_ATOL)
+    expanded = LibGEOS.buffer(poly, _ATOL)
     cutout = _to_geos_polygon(_project_outline(profile, datum))
-    LibGEOS.contains(shrunk, cutout) || throw(
-        ArgumentError(
-            "Cutout at $(origin(datum)) must lie wholly within plate perimeter",
-        ),
+
+    # Every cutout must lie within the plate bounds (`covers(expanded, cutout)`).
+    # Either it lies strictly inside the perimeter (`contains(shrunk, cutout)`,
+    # forming an interior window) or it shares a boundary segment with the
+    # perimeter so subtracting it (`difference(poly, cutout)`) opens a notch
+    # while leaving a single connected simple polygon with no interior islands.
+    LibGEOS.covers(expanded, cutout) || throw(
+        ArgumentError("Cutout at $(origin(datum)) must lie within plate bounds"),
     )
+    if !LibGEOS.contains(shrunk, cutout)
+        diff = LibGEOS.difference(poly, cutout)
+        is_valid_notch =
+            diff isa LibGEOS.Polygon &&
+            LibGEOS.isValid(diff) &&
+            isempty(LibGEOS.interiorRings(diff)) &&
+            _ATOL < LibGEOS.area(diff) < LibGEOS.area(poly) - _ATOL
+        is_valid_notch || throw(
+            ArgumentError(
+                "Cutout at $(origin(datum)) must either lie strictly within plate perimeter or cleanly notch a plate edge",
+            ),
+        )
+    end
 
     op = Cut(profile, datum)
     return _rebuild(part; parent=part, op=op)

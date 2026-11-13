@@ -421,15 +421,15 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws ArgumentError drill(plate, Circle(1.0), at(bottom, 0.5, 2.0), ThroughAll())
         @test_throws ArgumentError drill(plate, Circle(1.0), at(bottom, 5.5, 2.0), ThroughAll())
 
-        # Oversized or edge-breaking rectangular cutouts
+        # Oversized or out-of-bounds rectangular cutouts
         @test_throws ArgumentError cut(plate, Rectangle(6.0, 2.0), at(top, 3.0, 2.0))
         @test_throws ArgumentError cut(plate, Rectangle(2.0, 4.0), at(top, 3.0, 2.0))
-        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 1.0, 2.0))
-        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 5.0, 2.0))
-        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 3.0, 0.5))
-        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 3.0, 3.5))
-        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(bottom, 1.0, 2.0))
-        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(bottom, 5.0, 2.0))
+        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 0.5, 2.0))
+        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 5.5, 2.0))
+        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 3.0, 0.25))
+        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(top, 3.0, 3.75))
+        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(bottom, 0.5, 2.0))
+        @test_throws ArgumentError cut(plate, Rectangle(2.0, 1.0), at(bottom, 5.5, 2.0))
 
         # Blind hole depth >= plate thickness fails
         @test_throws ArgumentError drill(plate, Circle(1.0), at(top, 3.0, 2.0), Blind(0.25))

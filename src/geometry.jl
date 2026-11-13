@@ -241,7 +241,7 @@ function derive_mesh(part::RectangularTube)
     _add_tube_caps!(
         b,
         part,
-        _rect_outline(0.0, 0.0, part.width, part.height),
+        _cross_section_points(part),
         _rect_outline(t, t, part.width - t, part.height - t),
     )
 
@@ -257,7 +257,7 @@ tube axis along `+Z` centered at `(x, y) = (0, 0)`.
 """
 function derive_mesh(part::RoundTube)
     b = _MeshBuilder()
-    outer = _outline(Circle(part.outer_diameter))
+    outer = _cross_section_points(part)
     inner = _outline(Circle(part.outer_diameter - 2.0 * part.thickness))
     v_ob, v_ot, v_ib, v_it = _add_tube_caps!(b, part, outer, inner)
     _stitch_rings!(b, v_ot, v_ob; flip=true)

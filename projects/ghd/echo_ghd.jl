@@ -17,25 +17,29 @@ Base.@kwdef struct EchoGHDAttachmentSpec
     footplate_height::Float64 = 14.0           # Photo-estimated: 14.0 in tall
     footplate_thickness::Float64 = 0.1875      # Published: 3/16 in steel plate
     window_width::Float64 = 9.0                # Photo-estimated: 9.0 in center window width
-    window_height::Float64 = 6.5               # Photo-estimated: 6.5 in center window height (ears & web overlap top/bottom bridges)
+    window_height::Float64 = 7.5               # Adapted: 7.5 in center window height so all 4 × 1.0 in ear holes sit inside window
 
     # Upright side mounting ears (2×)
     ear_width::Float64 = 2.5                   # Photo-estimated: 2.5 in deep
-    ear_height::Float64 = 8.5                  # Photo-estimated: 8.5 in tall
+    ear_height::Float64 = 9.5                  # Adapted: 9.5 in tall (1.0 in top/bottom bridge weld overlap past 7.5 in window)
     ear_thickness::Float64 = 0.1875            # Published: 3/16 in laser-cut steel
     ear_spacing::Float64 = 3.0                 # Published: straddles 3×3 in upright
     ear_hole_diameter::Float64 = 1.0           # Inference: 1.0 in pin holes for SM-2.5
     ear_hole_x::Float64 = 1.5                  # Photo-estimated: 1.5 in from upright front face
-    ear_first_hole_y::Float64 = 1.25           # Photo-estimated: 1.25 in from bottom of ear
+    ear_first_hole_y::Float64 = 1.75           # Adapted: 1.75 in from bottom of ear (0.25 in inside window edge)
     ear_hole_spacing::Float64 = 2.0            # Inference: 2.0 in vertical centers matching SM-2.5
-    ear_hole_count::Int = 4                    # Inference: 4 holes spanning y = 1.25:2.0:7.25 in
+    ear_hole_count::Int = 4                    # Inference: 4 holes spanning y = 1.75:2.0:7.75 in
 
     # Central roller standoff web (1×)
-    web_width::Float64 = 6.0                   # Photo-estimated: 6.0 in forward projection
-    web_height::Float64 = 10.5                 # Photo-estimated: 10.5 in tall
+    web_width::Float64 = 6.0                   # Photo-estimated: 6.0 in forward projection from footplate front face
+    web_height::Float64 = 10.5                 # Photo-estimated: 10.5 in tall (1.5 in top/bottom bridge weld overlap)
     web_thickness::Float64 = 0.1875            # Photo-estimated: 3/16 in vertical steel plate
+    web_rear_base_width::Float64 = 1.0         # Photo-estimated: 1.0 in full-height rear base tab at footplate bridges
+    web_gusset_width::Float64 = 1.0            # Photo-estimated: 1.0 in horizontal gusset taper into central neck
+    web_front_post_width::Float64 = 2.0        # Photo-estimated: 2.0 in wide vertical front post supporting roller axles
+    web_neck_height::Float64 = 3.0             # Photo-estimated: 3.0 in tall central horizontal neck across window
     web_axle_hole_diameter::Float64 = 1.0      # Published/Inference: 1.0 in axle bore
-    web_axle_hole_x::Float64 = 5.0             # Photo-estimated: 5.0 in forward from footplate back face
+    web_axle_hole_x::Float64 = 5.0             # Photo-estimated: 5.0 in forward from footplate front face
     web_axle_hole_ys::Tuple{Float64,Float64} = (1.0, 9.5)  # Photo-estimated: 8.5 in vertical spacing
 
     # Roller axle shafts (2×)
@@ -70,7 +74,8 @@ end
 """
     build_side_ear(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec()) -> Plate
 
-Build a 7-hole upright side mounting ear from flat plate stock.
+Build a 4-hole upright side mounting ear (adapted to SM-2.5 `1.0 in` holes on
+`2.0 in` centers) from flat plate stock.
 """
 function build_side_ear(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     ear = Plate(spec.ear_width, spec.ear_height, spec.ear_thickness)
@@ -87,11 +92,32 @@ end
 """
     build_standoff_web(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec()) -> Plate
 
-Build the central vertical roller standoff web with upper and lower axle holes.
+Build the contoured central vertical roller standoff web with top and bottom
+perimeter cutouts (forming rear bridge tabs/gussets, a central horizontal neck,
+and a front vertical axle post) and upper and lower axle holes.
 """
 function build_standoff_web(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     web = Plate(spec.web_width, spec.web_height, spec.web_thickness)
     top = datum(web, SVector(0, 0, 1))
+    x1 = spec.web_rear_base_width
+    x2 = x1 + spec.web_gusset_width
+    x3 = spec.web_width - spec.web_front_post_width
+    neck_y0 = (spec.web_height - spec.web_neck_height) / 2.0
+    neck_y1 = (spec.web_height + spec.web_neck_height) / 2.0
+    bottom_notch = Polygon([
+        SVector(x1, 0.0),
+        SVector(x3, 0.0),
+        SVector(x3, neck_y0),
+        SVector(x2, neck_y0),
+    ])
+    top_notch = Polygon([
+        SVector(x2, neck_y1),
+        SVector(x3, neck_y1),
+        SVector(x3, spec.web_height),
+        SVector(x1, spec.web_height),
+    ])
+    web = cut(web, bottom_notch, top)
+    web = cut(web, top_notch, top)
     hole = Circle(spec.web_axle_hole_diameter)
     for y in spec.web_axle_hole_ys
         d = Datum(top.frame ∘ Translation(spec.web_axle_hole_x, y, 0.0))
@@ -168,11 +194,11 @@ function build_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSp
         web_assembly = weld(web_assembly, hole_op.datum, axle, d_axle, axle_seam)
     end
 
-    # 3. Central roller standoff web sub-weldment welded along its lower 1.0 in rear
-    #    bridge tab (x=0, y∈[0, 1.0], z=0) to the footplate's lower bridge at x = 12.0 + t/2.
+    # 3. Central roller standoff web sub-weldment welded along its lower 1.5 in rear
+    #    bridge tab (x=0, y∈[0, 1.5], z=0) to the footplate's front face (z=t) at x = 12.0 + t/2.
     d_web = Datum(LinearMap(RotZ(π / 2)))
     d_fp_web = Datum(
-        Translation(center_x + spec.web_thickness / 2.0, web_y0, 0.0) ∘
+        Translation(center_x + spec.web_thickness / 2.0, web_y0, spec.footplate_thickness) ∘
         LinearMap(RotZ(π / 2) * RotX(-π / 2)),
     )
     return weld(frame, d_fp_web, web_assembly, d_web, LineSegment(web_bridge_overlap))
@@ -210,7 +236,7 @@ function build_echo_ghd_assembly(;
     web_z0 = mount_z + center_z - attachment_spec.web_height / 2.0
     lower_axle_z = web_z0 + attachment_spec.web_axle_hole_ys[1]
     upper_axle_z = web_z0 + attachment_spec.web_axle_hole_ys[2]
-    axle_x = upright_front_x + attachment_spec.web_axle_hole_x
+    axle_x = upright_front_x + attachment_spec.footplate_thickness + attachment_spec.web_axle_hole_x
     left_roller_y0 = -attachment_spec.roller_inner_offset_y - attachment_spec.roller_length
     right_roller_y0 = attachment_spec.ear_spacing + attachment_spec.roller_inner_offset_y
 
@@ -235,3 +261,12 @@ function build_echo_ghd_assembly(;
         roller => t_upper_right_roller,
     ])
 end
+
+visualize_echo_ghd_weldment(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec()) =
+    visualize(build_echo_ghd_weldment(spec))
+
+visualize_echo_ghd_assembly(; kwargs...) =
+    visualize(build_echo_ghd_assembly(; kwargs...))
+
+visualize_echo_ghd_graph(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec()) =
+    visualize(ManufacturingGraph(build_echo_ghd_weldment(spec)))

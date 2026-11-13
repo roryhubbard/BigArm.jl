@@ -171,7 +171,7 @@ end
     roller = build_foam_roller(spec)
     frame = build_echo_ghd_weldment(spec)
 
-    # Footplate: 24 × 14 × 3/16 in plate with 9.0 × 6.5 in rectangular cutout window
+    # Footplate: 24 × 14 × 3/16 in plate with 9.0 × 7.5 in rectangular cutout window
     @test footplate isa Plate
     @test footplate.width === 24.0
     @test footplate.height === 14.0
@@ -184,27 +184,32 @@ end
     @test hi_fp ≈ SVector(24.0, 14.0, 0.1875) atol = 1e-12
     fp_stats = check_manifold_and_volume(fp_mesh)
     @test fp_stats.euler == 0
-    @test fp_stats.volume ≈ (24.0 * 14.0 - 9.0 * 6.5) * 0.1875 atol = 1e-9
+    @test fp_stats.volume ≈ (24.0 * 14.0 - 9.0 * 7.5) * 0.1875 atol = 1e-9
 
-    # Side ear: 2.5 × 8.5 × 3/16 in plate with 4 × 1.0 in through-holes on 2.0 in centers
+    # Side ear: 2.5 × 9.5 × 3/16 in plate with 4 × 1.0 in through-holes on 2.0 in centers
+    # All 4 holes (y = 1.75:2.0:7.75, spanning 1.25..8.25) sit cleanly inside the 7.5 in window (1.0..8.5)
     @test ear isa Plate
     @test ear.width === 2.5
-    @test ear.height === 8.5
+    @test ear.height === 9.5
     @test ear.thickness === 0.1875
     @test length(operations_of_type(Drill, ear)) == 4
     ear_mesh = derive_mesh(ear)
     ear_stats = check_manifold_and_volume(ear_mesh)
     @test ear_stats.euler == 2 - 2 * 4
 
-    # Central roller standoff web: 6.0 × 10.5 × 3/16 in plate with 2 × 1.0 in axle holes
+    # Contoured central roller standoff web: 6.0 × 10.5 × 3/16 in plate with 2 perimeter notches & 2 × 1.0 in axle holes
     @test web isa Plate
     @test web.width === 6.0
     @test web.height === 10.5
     @test web.thickness === 0.1875
+    @test length(operations_of_type(Cut, web)) == 2
     @test length(operations_of_type(Drill, web)) == 2
     web_mesh = derive_mesh(web)
     web_stats = check_manifold_and_volume(web_mesh)
     @test web_stats.euler == 2 - 2 * 2
+    notch_area = 2 * 0.5 * ((4.0 - 1.0) + (4.0 - 2.0)) * 3.75
+    hole_area = 2 * (BigArm._CIRCLE_SEGMENTS / 2) * (0.5)^2 * sin(2π / BigArm._CIRCLE_SEGMENTS)
+    @test web_stats.volume ≈ (6.0 * 10.5 - notch_area - hole_area) * 0.1875 atol = 1e-9
 
     # Roller axle shaft: 1.0 in OD × 20.0 in long round steel tube (0.120 in wall)
     @test axle isa RoundTube
@@ -225,11 +230,11 @@ end
     # Welded steel frame DAG and mesh
     @test frame isa Weldment
     @test operation(frame) isa Weld
-    @test operation(frame).profile === LineSegment(2.0)
+    @test operation(frame).profile === LineSegment(1.5)
     frame_g = ManufacturingGraph(frame)
     @test frame_g.nodes[end] === frame
     @test count(isstock, frame_g.nodes) == 4
-    @test length(operations_of_type(Cut, frame)) == 1
+    @test length(operations_of_type(Cut, frame)) == 3
     @test length(operations_of_type(Drill, frame)) == 6
     @test length(operations_of_type(Saw, frame)) == 1
     weld_ops = operations_of_type(Weld, frame)
@@ -239,15 +244,15 @@ end
         LineSegment(1.0),
         Circle(1.0),
         Circle(1.0),
-        LineSegment(2.0),
+        LineSegment(1.5),
     ]
     frame_dot = to_dot(frame_g)
     @test occursin("part Weldment", frame_dot)
-    @test occursin("Weld(LineSegment(1.0), (10.3125, 2.75, 0.0))", frame_dot)
-    @test occursin("Weld(LineSegment(1.0), (13.5, 2.75, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(1.0), (10.3125, 2.25, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(1.0), (13.5, 2.25, 0.0))", frame_dot)
     @test occursin("Weld(Circle(1.0), (5.0, 1.0, 0.1875))", frame_dot)
     @test occursin("Weld(Circle(1.0), (5.0, 9.5, 0.1875))", frame_dot)
-    @test occursin("Weld(LineSegment(2.0), (12.09375, 1.75, 0.0))", frame_dot)
+    @test occursin("Weld(LineSegment(1.5), (12.09375, 1.75, 0.1875))", frame_dot)
     @test count(line -> occursin("[label=\"Weld(", line), split(chomp(frame_dot), '\n')) == 10
 
     for node in frame_g.nodes
@@ -256,7 +261,7 @@ end
     frame_mesh = derive_mesh(frame)
     lo_f, hi_f = mesh_bbox(frame_mesh)
     @test lo_f ≈ SVector(0.0, 0.0, -2.5) atol = 1e-12
-    @test hi_f ≈ SVector(24.0, 14.0, 6.0) atol = 1e-12
+    @test hi_f ≈ SVector(24.0, 14.0, 6.1875) atol = 1e-12
     frame_stats = check_manifold_and_volume(frame_mesh)
     @test frame_stats.volume ≈
           fp_stats.volume + 2 * ear_stats.volume + web_stats.volume + 2 * axle_stats.volume atol = 1e-9
