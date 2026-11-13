@@ -35,9 +35,8 @@ Base.@kwdef struct EchoGHDAttachmentSpec
     web_height::Float64 = 10.5                 # Photo-estimated: 10.5 in tall (1.5 in top/bottom bridge weld overlap)
     web_thickness::Float64 = 0.1875            # Photo-estimated: 3/16 in vertical steel plate
     web_rear_base_width::Float64 = 1.0         # Photo-estimated: 1.0 in full-height rear base tab at footplate bridges
-    web_gusset_width::Float64 = 1.0            # Photo-estimated: 1.0 in horizontal gusset taper into central neck
     web_front_post_width::Float64 = 2.0        # Photo-estimated: 2.0 in wide vertical front post supporting roller axles
-    web_neck_height::Float64 = 3.0             # Photo-estimated: 3.0 in tall central horizontal neck across window
+    web_neck_height::Float64 = 4.5             # Photo-estimated: 4.5 in tall central horizontal neck across window
     web_axle_hole_diameter::Float64 = 1.0      # Published/Inference: 1.0 in axle bore
     web_axle_hole_x::Float64 = 5.0             # Photo-estimated: 5.0 in forward from footplate front face
     web_axle_hole_ys::Tuple{Float64,Float64} = (1.0, 9.5)  # Photo-estimated: 8.5 in vertical spacing
@@ -100,24 +99,17 @@ function build_standoff_web(spec::EchoGHDAttachmentSpec=EchoGHDAttachmentSpec())
     web = Plate(spec.web_width, spec.web_height, spec.web_thickness)
     top = datum(web, SVector(0, 0, 1))
     x1 = spec.web_rear_base_width
-    x2 = x1 + spec.web_gusset_width
-    x3 = spec.web_width - spec.web_front_post_width
-    neck_y0 = (spec.web_height - spec.web_neck_height) / 2.0
-    neck_y1 = (spec.web_height + spec.web_neck_height) / 2.0
-    bottom_notch = Polygon([
-        SVector(x1, 0.0),
-        SVector(x3, 0.0),
-        SVector(x3, neck_y0),
-        SVector(x2, neck_y0),
-    ])
-    top_notch = Polygon([
-        SVector(x2, neck_y1),
-        SVector(x3, neck_y1),
-        SVector(x3, spec.web_height),
-        SVector(x1, spec.web_height),
-    ])
-    web = cut(web, bottom_notch, top)
-    web = cut(web, top_notch, top)
+    x2 = spec.web_width - spec.web_front_post_width
+    notch_chord = x2 - x1
+    notch_x = (x1 + x2) / 2.0
+    notch_height = (spec.web_height - spec.web_neck_height) / 2.0
+    notch = CircularSegment(notch_chord, notch_height)
+    d_bottom_notch = Datum(top.frame ∘ Translation(notch_x, 0.0, 0.0))
+    d_top_notch = Datum(
+        top.frame ∘ Translation(notch_x, spec.web_height, 0.0) ∘ LinearMap(RotZ(π)),
+    )
+    web = cut(web, notch, d_bottom_notch)
+    web = cut(web, notch, d_top_notch)
     hole = Circle(spec.web_axle_hole_diameter)
     for y in spec.web_axle_hole_ys
         d = Datum(top.frame ∘ Translation(spec.web_axle_hole_x, y, 0.0))

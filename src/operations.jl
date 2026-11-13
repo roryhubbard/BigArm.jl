@@ -59,13 +59,12 @@ struct Drill <: AbstractOperation
 end
 
 """
-    Cut(profile::Union{Circle,Rectangle,Polygon}, datum::Datum)
+    Cut(profile::AbstractProfile, datum::Datum)
 
-Profile-cutting operation cutting 2D `profile` (`Circle`, `Rectangle`, or
-`Polygon`) through the wall at `datum`.
+Profile-cutting operation cutting 2D `profile` through the wall at `datum`.
 """
 struct Cut <: AbstractOperation
-    profile::Union{Circle,Rectangle,Polygon}
+    profile::AbstractProfile
     datum::Datum
 end
 
@@ -408,16 +407,15 @@ function drill(
 end
 
 """
-    cut(part::RectangularTube, profile::Union{Circle,Rectangle,Polygon}, datum::Datum)
+    cut(part::RectangularTube, profile::AbstractProfile, datum::Datum)
 
-Cut 2D `profile` (`Circle`, `Rectangle`, or `Polygon`) through the wall of
-`part` at `datum`. Validates that `datum` lies on a valid outer face of `part`
-and that every vertex of `profile` fits strictly within the inner cavity width
-and sawn tube ends.
+Cut 2D `profile` through the wall of `part` at `datum`. Validates that `datum`
+lies on a valid outer face of `part` and that every vertex of `profile` fits
+strictly within the inner cavity width and sawn tube ends.
 """
 function cut(
     part::RectangularTube,
-    profile::Union{Circle,Rectangle,Polygon},
+    profile::AbstractProfile,
     datum::Datum,
 )
     face, _, _ = _match_face(part, datum)
@@ -446,17 +444,16 @@ function cut(
 end
 
 """
-    cut(part::Plate, profile::Union{Circle,Rectangle,Polygon}, datum::Datum)
+    cut(part::Plate, profile::AbstractProfile, datum::Datum)
 
-Cut 2D `profile` (`Circle`, `Rectangle`, or `Polygon`) through `part`, where
-`profile` is expressed in the coordinate frame of `datum`. Validates that
-`datum` lies on a valid flat surface of `part` and that `profile` either fits
-strictly within the plate perimeter (an interior window) or cleanly notches the
-plate perimeter without splitting it.
+Cut 2D `profile` through `part`, where `profile` is expressed in the coordinate
+frame of `datum`. Validates that `datum` lies on a valid flat surface of `part`
+and that `profile` either fits strictly within the plate perimeter (an interior
+window) or cleanly notches the plate perimeter without splitting it.
 """
 function cut(
     part::Plate,
-    profile::Union{Circle,Rectangle,Polygon},
+    profile::AbstractProfile,
     datum::Datum,
 )
     _match_face(part, datum)

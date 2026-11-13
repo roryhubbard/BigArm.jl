@@ -124,7 +124,7 @@ Models the exact factory Echo GHD geometry shown in `Echo GHD 2.png`–`4.png`, 
    - Each drilled with `4` holes (`Circle(1.0)`) on `2.0 in` vertical centers at `x = 1.5 in`, `y = 1.75:2.0:7.75 in` (all 4 holes inside the `7.5 in` window opening).
    - Welded to the back of the Footplate (`X = 3.0`) at `Y ∈ [-0.1875, 0.0]` and `Y ∈ [3.0, 3.1875]`, spanning `X ∈ [0.5, 3.0]` and `Z ∈ [mount_z + 2.25, mount_z + 11.75]`.
 3. **Central Roller Standoff Web (`Plate(6.0, 10.5, 0.1875)`)**:
-   - Contoured with top and bottom perimeter cutouts leaving a `1.0 in` rear base, `1.0 in` gusset taper, `3.0 in` tall central horizontal neck, and `2.0 in` wide front vertical axle post.
+   - Contoured with top and bottom `CircularSegment(3.0, 3.0)` perimeter cutouts leaving a `1.0 in` rear base, `4.5 in` tall central horizontal neck, and `2.0 in` wide front vertical axle post.
    - Drilled with `2` axle holes (`Circle(1.0)`) at `x = 5.0 in`, `y = 1.0 in` (lower) and `y = 9.5 in` (upper).
    - Welded vertically to the **front** face of the Footplate (`X = 3.1875`) at the center (`Y ∈ [1.5 - 0.09375, 1.5 + 0.09375]`), projecting forward along `X ∈ [3.1875, 9.1875]` and `Z ∈ [mount_z + 1.75, mount_z + 12.25]`.
 4. **Upper & Lower Roller Axle Shafts (`2 × saw(RoundTube(1.0, 240.0, 0.120), 20.0)`)**:

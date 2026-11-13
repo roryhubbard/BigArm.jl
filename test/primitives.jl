@@ -33,6 +33,12 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test c isa AbstractProfile
         @test c.diameter === 1.0
 
+        sc = CircularSegment(2, 0.5)
+        @test sc isa CircularSegment
+        @test sc isa AbstractProfile
+        @test sc.chord === 2.0
+        @test sc.height === 0.5
+
         rect = Rectangle(9, 8.5)
         @test rect isa Rectangle
         @test rect isa AbstractProfile
@@ -199,6 +205,10 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws DomainError LineSegment(-1.0)
         @test_throws DomainError Circle(0.0)
         @test_throws DomainError Circle(-1.0)
+        @test_throws DomainError CircularSegment(0.0, 1.0)
+        @test_throws DomainError CircularSegment(-2.0, 1.0)
+        @test_throws DomainError CircularSegment(2.0, 0.0)
+        @test_throws DomainError CircularSegment(2.0, -1.0)
         @test_throws DomainError Rectangle(0.0, 4.0)
         @test_throws DomainError Rectangle(-2.0, 4.0)
         @test_throws DomainError Rectangle(2.0, 0.0)
@@ -331,6 +341,7 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         tri_cutout = Polygon([SVector(-1.0, -0.75), SVector(1.0, -0.75), SVector(0.0, 0.75)])
         windowed_two = cut(windowed_drilled, tri_cutout, at(fp_bottom, 3.0, 7.0))
         windowed_three = cut(windowed_two, Circle(2.0), at(fp_top, 21.0, 3.0))
+        windowed_four = cut(windowed_three, CircularSegment(2.0, 0.75), at(fp_top, 3.0, 0.0))
 
         @test windowed isa Plate
         @test !isstock(windowed)
@@ -339,13 +350,15 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test operation(windowed).profile === Rectangle(9.0, 8.5)
         @test length(operations_of_type(Cut, windowed)) == 1
         @test isempty(operations_of_type(Drill, windowed))
-        cut_ops = operations_of_type(Cut, windowed_three)
-        @test length(cut_ops) == 3
-        @test length(operations_of_type(Drill, windowed_three)) == 1
+        cut_ops = operations_of_type(Cut, windowed_four)
+        @test length(cut_ops) == 4
+        @test length(operations_of_type(Drill, windowed_four)) == 1
         @test origin(cut_ops[1].datum) ≈ SVector(12.0, 7.0, 0.1875) atol = 1e-12
         @test origin(cut_ops[2].datum) ≈ SVector(21.0, 7.0, 0.0) atol = 1e-12
         @test cut_ops[3].profile === Circle(2.0)
         @test origin(cut_ops[3].datum) ≈ SVector(21.0, 3.0, 0.1875) atol = 1e-12
+        @test cut_ops[4].profile === CircularSegment(2.0, 0.75)
+        @test origin(cut_ops[4].datum) ≈ SVector(3.0, 0.0, 0.1875) atol = 1e-12
     end
 
     @testset "Invalid holes and saw cuts" begin
@@ -498,7 +511,6 @@ at(d::Datum, x::Real, y::Real, z::Real=0.0) =
         @test_throws MethodError drill(plate, Rectangle(1.0, 1.0), dp, ThroughAll())
         @test_throws MethodError cut(UnsupportedPart(), Rectangle(1.0, 1.0), dp)
         @test_throws MethodError cut(plate, SquareProfile(), dp)
-        @test_throws MethodError cut(plate, LineSegment(1.0), dp)
         @test_throws MethodError cut(plate, Rectangle(1.0, 1.0), dp, ThroughAll())
 
         w = weld(blank, Datum(Translation(0.0, 0.0, 10.0)), plate, Datum(), LineSegment(3.0))

@@ -80,6 +80,8 @@ end
 
 _profile_label(profile::LineSegment) = "LineSegment($(_fmt(profile.length)))"
 _profile_label(profile::Circle) = "Circle($(_fmt(profile.diameter)))"
+_profile_label(profile::CircularSegment) =
+    "CircularSegment($(_fmt(profile.chord)), $(_fmt(profile.height)))"
 _profile_label(profile::Rectangle) = "Rectangle($(_fmt(profile.width)), $(_fmt(profile.height)))"
 _profile_label(profile::Polygon) = "Polygon($(length(profile.points)))"
 _profile_label(profile::AbstractProfile) = string(nameof(typeof(profile)))

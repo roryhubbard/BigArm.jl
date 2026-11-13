@@ -197,18 +197,19 @@ end
     ear_stats = check_manifold_and_volume(ear_mesh)
     @test ear_stats.euler == 2 - 2 * 4
 
-    # Contoured central roller standoff web: 6.0 × 10.5 × 3/16 in plate with 2 perimeter notches & 2 × 1.0 in axle holes
+    # Contoured central roller standoff web: 6.0 × 10.5 × 3/16 in plate with 2 CircularSegment notches & 2 × 1.0 in axle holes
     @test web isa Plate
     @test web.width === 6.0
     @test web.height === 10.5
     @test web.thickness === 0.1875
     @test length(operations_of_type(Cut, web)) == 2
+    @test all(op -> op.profile === CircularSegment(3.0, 3.0), operations_of_type(Cut, web))
     @test length(operations_of_type(Drill, web)) == 2
     web_mesh = derive_mesh(web)
     web_stats = check_manifold_and_volume(web_mesh)
     @test web_stats.euler == 2 - 2 * 2
-    notch_area = 2 * 0.5 * ((4.0 - 1.0) + (4.0 - 2.0)) * 3.75
-    hole_area = 2 * (BigArm._CIRCLE_SEGMENTS / 2) * (0.5)^2 * sin(2π / BigArm._CIRCLE_SEGMENTS)
+    notch_area = 2 * BigArm.LibGEOS.area(BigArm._to_geos_polygon(BigArm._outline(CircularSegment(3.0, 3.0))))
+    hole_area = 2 * BigArm.LibGEOS.area(BigArm._to_geos_polygon(BigArm._outline(Circle(1.0))))
     @test web_stats.volume ≈ (6.0 * 10.5 - notch_area - hole_area) * 0.1875 atol = 1e-9
 
     # Roller axle shaft: 1.0 in OD × 20.0 in long round steel tube (0.120 in wall)
