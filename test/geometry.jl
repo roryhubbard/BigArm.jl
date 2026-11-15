@@ -353,6 +353,17 @@ end
         @test s_chamfer.nverts == 10
         @test s_chamfer.euler == 2
         @test s_chamfer.volume ≈ (6.0 * 4.0 - 0.5 * 2.0 * 2.0) * 0.25 atol = 1e-9
+
+        # Circular-segment edge notch on bottom edge (y = 0.0) of a Plate
+        semi_notched = cut(
+            raw_plate,
+            CircularSegment(2.0, 1.0),
+            Datum(top.frame ∘ Translation(3.0, 0.0, 0.0)),
+        )
+        m_semi = derive_mesh(semi_notched)
+        s_semi = check_manifold_and_volume(m_semi)
+        @test s_semi.euler == 2
+        @test isapprox(raw_stats.volume - s_semi.volume, 0.5 * π * 1.0^2 * 0.25; rtol=0.01)
     end
 
     @testset "RoundTube meshes" begin

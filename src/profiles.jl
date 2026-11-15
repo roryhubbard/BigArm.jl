@@ -37,6 +37,27 @@ struct Circle <: AbstractProfile
     end
 end
 
+"""
+    CircularSegment(chord, height)
+
+Circular-segment 2D cut profile in a `Datum`'s XY plane with positive `chord`
+along the datum X-axis (`x ∈ [-chord / 2, chord / 2]`, `y = 0`) and positive
+arc `height` into the `+Y` half-plane (apex at `(0, height)`), in inches
+(`Float64`). When `height == chord / 2`, the segment is a semicircle.
+"""
+struct CircularSegment <: AbstractProfile
+    chord::Float64
+    height::Float64
+
+    function CircularSegment(chord::Real, height::Real)
+        c = Float64(chord)
+        h = Float64(height)
+        ispositive(c) || throw(DomainError(chord, "CircularSegment chord must be positive"))
+        ispositive(h) || throw(DomainError(height, "CircularSegment height must be positive"))
+        return new(c, h)
+    end
+end
+
 function _rect_outline(x0::Real, y0::Real, x1::Real, y1::Real)
     return Point2d[
         Point2d(Float64(x0), Float64(y0)),
@@ -86,17 +107,22 @@ struct Polygon <: AbstractProfile
 end
 
 """
-    Rectangle(width, height) -> Polygon
+    Rectangle(width, height)
 
-Convenience constructor returning a centered `width × height` rectangular
-`Polygon` profile in a `Datum`'s XY plane.
+Centered rectangular 2D cut profile in a `Datum`'s XY plane with positive
+`width` (X) and `height` (Y), in inches (`Float64`).
 """
-function Rectangle(width::Real, height::Real)
-    w = Float64(width)
-    h = Float64(height)
-    ispositive(w) || throw(DomainError(width, "Rectangle width must be positive"))
-    ispositive(h) || throw(DomainError(height, "Rectangle height must be positive"))
-    return Polygon(_rect_outline(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0))
+struct Rectangle <: AbstractProfile
+    width::Float64
+    height::Float64
+
+    function Rectangle(width::Real, height::Real)
+        w = Float64(width)
+        h = Float64(height)
+        ispositive(w) || throw(DomainError(width, "Rectangle width must be positive"))
+        ispositive(h) || throw(DomainError(height, "Rectangle height must be positive"))
+        return new(w, h)
+    end
 end
 
 """
@@ -110,10 +136,29 @@ _outline(profile::LineSegment) = Point2d[Point2d(0.0, 0.0), Point2d(profile.leng
 function _outline(profile::Circle; segments::Int=_CIRCLE_SEGMENTS)
     r = profile.diameter / 2.0
     return Point2d[
-        Point2d(r * cos(2π * (i - 1) / segments), r * sin(2π * (i - 1) / segments))
+        Point2d(r * cospi(2 * (i - 1) / segments), r * sinpi(2 * (i - 1) / segments))
         for i in 1:segments
     ]
 end
+
+function _outline(profile::CircularSegment; segments::Int=_CIRCLE_SEGMENTS ÷ 2)
+    a = profile.chord / 2.0
+    h = profile.height
+    r = (a^2 + h^2) / (2.0 * h)
+    yc = h - r
+    ϕ_max = 2.0 * atan(h, a)
+    pts = Vector{Point2d}(undef, segments + 1)
+    pts[1] = Point2d(a, 0.0)
+    for i in 1:(segments - 1)
+        ϕ = ϕ_max * (2.0 * i / segments - 1.0)
+        pts[i + 1] = Point2d(-r * sin(ϕ), yc + r * cos(ϕ))
+    end
+    pts[segments + 1] = Point2d(-a, 0.0)
+    return pts
+end
+
+_outline(profile::Rectangle) =
+    _rect_outline(-profile.width / 2.0, -profile.height / 2.0, profile.width / 2.0, profile.height / 2.0)
 
 _outline(profile::Polygon) = profile.points
 
