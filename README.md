@@ -214,9 +214,7 @@ must be measured.
 
 What if your shop provided the API you designed parts with? If a design compiled
 against their stock and operations, you would get manufacturable geometry, a
-process plan, and a cost and lead-time estimate on the spot. Pair that with
-lights-out automation — the kind shops like Hadrian are building — and you could
-submit a script at night and pick up finished parts in the morning.
+process plan, and a cost and lead-time estimate on the spot. Pair that with automation and you could submit a script at night and pick up finished parts in the morning.
 
 ## License
 
