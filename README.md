@@ -7,8 +7,7 @@
 ## What this is
 
 BigArm is a minimal Julia package for designing manufacturable parts and generating
-the artifacts needed to fabricate them: cut files, drawings, drill plans, cost
-estimates, and inspection sheets.
+the artifacts needed to fabricate them: cut files, 3D models, and drawings.
 
 The first applied project is a custom glute-ham developer (GHD) extension for a
 Rogue SM-2.5 Monster Squat Stand 2.0 — adapter plates, brackets, and tube sections
@@ -40,8 +39,7 @@ plates, brackets, and tube sections.
    unrepresentable.
 2. **Operations are the model; geometry is derived.** A drilled hole is a
    first-class operation in the graph with a stable identity, not something
-   reverse-engineered from faces. The hole table, drill plan, and inspection
-   sheet are *reads* of the model.
+   reverse-engineered from faces.
 3. **Tolerances are data.** Fit against mating hardware is checked across tolerance
    ranges, not assumed at nominal dimensions.
 4. **A small set of primitives.** BigArm is built up from a few carefully
@@ -100,8 +98,7 @@ Ideas the graph opens up, to be tested rather than promised:
 ```
 design script ──► manufacturing graph ──┬──► derived geometry ──► MeshCat, DXF, STEP, …
                   stock + operations,   ├──► graph view
-                  checked as built      ├──► DFM checks
-                                        └──► process plan, hole table, cost
+                  checked as built      └──► DFM checks
 ```
 
 - **Manufacturing graph** — the model: mill stock and the shop operations applied
@@ -112,8 +109,6 @@ design script ──► manufacturing graph ──┬──► derived geometry 
   No face/edge/vertex topology is maintained — the initial 2.5D scope doesn't need it.
 - **Graph view** — the graph itself, with the part at any node viewable in MeshCat.
 - **DFM checks** — advisory rules, run as tests.
-- **Process layer** — the graph *is* the process plan. Cycle-time and cost
-  estimation, drill sequences, and inspection points are generated from it.
 
 ## Stack
 
@@ -155,9 +150,6 @@ fabrication-ready on its own.
 | DXF                         | native          | Laser / plasma / waterjet plate work  |
 | STL                         | MeshIO / FileIO | Printed prototypes, jigs, templates   |
 | SVG → PDF drawings          | native          | Shop drawings, 1:1 drill templates    |
-| Hole table (CSV)            | native          | Drill planning, inspection            |
-| Process plan + cost estimate| native          | Build planning, quote comparison      |
-| Inspection sheet            | native          | First-article check against nominal   |
 
 ## Example (API sketch — not final)
 
